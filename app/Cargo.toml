@@ -1,0 +1,19 @@
+[package]
+name = "feathered-app"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "feathered"
+path = "src/main.rs"
+
+[dependencies]
+feathered-client.workspace = true
+feathered-renderer.workspace = true
+feathered-chunk.workspace = true
+feathered-world.workspace = true
+feathered-assets.workspace = true
+pollster.workspace = true

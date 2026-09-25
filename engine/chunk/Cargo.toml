@@ -1,0 +1,12 @@
+[package]
+name = "feathered-chunk"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+feathered-world.workspace = true
+feathered-assets.workspace = true
+bytemuck.workspace = true

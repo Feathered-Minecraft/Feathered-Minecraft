@@ -1,0 +1,16 @@
+[package]
+name = "feathered-client"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+feathered-renderer.workspace = true
+feathered-chunk.workspace = true
+feathered-world.workspace = true
+feathered-assets.workspace = true
+winit.workspace = true
+pollster.workspace = true
+image.workspace = true
