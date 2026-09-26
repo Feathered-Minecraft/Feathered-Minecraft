@@ -18,7 +18,8 @@
 //! `Queue::present(texture)`.
 
 use feathered_assets::atlas::Atlas;
-use feathered_chunk::{mesh_world, MeshedChunk, TintPolicy, Vertex};
+use feathered_chunk::{mesh_world, MeshLayer, MeshedChunk, TintPolicy, Vertex};
+use feathered_world::chunks::ChunkPos;
 use feathered_world::grid::World;
 use feathered_world::{LightGrid, Registry};
 use wgpu::util::DeviceExt;
@@ -30,6 +31,7 @@ pub use shader_config::{
 };
 
 /// Camera: position + yaw/pitch, perspective projection.
+#[derive(Debug, Clone, Copy)]
 pub struct Camera {
     pub pos: [f32; 3],
     pub yaw: f32,
@@ -89,6 +91,14 @@ fn look_at(eye: [f32; 3], target: [f32; 3], up: [f32; 3]) -> [[f32; 4]; 4] {
 }
 
 impl Camera {
+    /// Unit forward vector (yaw/pitch convention: NEGATIVE pitch = down,
+    /// matching the view matrix above).
+    pub fn forward(&self) -> [f32; 3] {
+        let (sin_y, cos_y) = self.yaw.sin_cos();
+        let (sin_p, cos_p) = self.pitch.sin_cos();
+        [sin_y * cos_p, sin_p, -cos_y * cos_p]
+    }
+
     /// Combined view-projection, built directly in **WGSL storage order**:
     /// `out[j]` is column j of the mathematical matrix M = P·V (so the shader's
     /// `M * v` with column vectors is exact). No transpose/mul ambiguity.
@@ -279,6 +289,341 @@ pub struct ShadowParams {
     pub config: [f32; 4],
 }
 
+/// CPU-authored overlay geometry for one frame (see client/src/overlay.rs).
+/// The client fills the tri-lists; the renderer uploads and draws them on
+/// top of the finished frame.
+#[derive(Default)]
+pub struct HudDraw {
+    /// Screen-space triangles (UI pixels): crosshair, hotbar, text, progress.
+    pub screen: client_overlay::TriList,
+    /// World-space triangles (blocks): block outline, particles.
+    pub world: client_overlay::TriList,
+}
+
+/// Client-side overlay vertex/list types, re-exported for the renderer's
+/// public API without a crate dependency cycle (the types are POD mirrors).
+pub mod client_overlay {
+    /// Mirrors feathered_client::overlay::HudVertex (24 bytes: 12 pos + 4
+    /// color + 8 px, no padding).
+    #[repr(C)]
+    #[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+    pub struct HudVertex {
+        pub pos: [f32; 3],
+        pub color: [u8; 4],
+        pub px: [f32; 2],
+    }
+    const _: () = assert!(std::mem::size_of::<HudVertex>() == 24);
+
+    /// Mirrors feathered_client::overlay::TriList.
+    #[derive(Debug, Default)]
+    pub struct TriList {
+        pub vertices: Vec<HudVertex>,
+        pub indices: Vec<u32>,
+    }
+}
+
+/// Persistent GPU state for the overlay system (HUD + outlines). Buffers
+/// are recreated (not resized) per frame only when the draw list grows —
+/// normal HUD churn is a few hundred quads.
+struct OverlayState {
+    screen_params_buf: wgpu::Buffer,
+    screen_bind: wgpu::BindGroup,
+    screen_pipeline: wgpu::RenderPipeline,
+    screen_pipeline_capture: wgpu::RenderPipeline,
+    /// Outline pass binds the shared globals (view_proj) + scene depth.
+    outline_pipeline: wgpu::RenderPipeline,
+    outline_pipeline_capture: wgpu::RenderPipeline,
+    screen_vbuf: wgpu::Buffer,
+    screen_ibuf: wgpu::Buffer,
+    /// Buffer capacities (vertices / indices) — grown lazily.
+    screen_vcap: usize,
+    screen_icap: usize,
+    /// Indices to draw this frame (0 = skip the pass).
+    screen_count: u32,
+    outline_vbuf: wgpu::Buffer,
+    outline_ibuf: wgpu::Buffer,
+    outline_vcap: usize,
+    outline_icap: usize,
+    outline_count: u32,
+}
+
+/// One chunk's persistent GPU geometry.
+pub struct GpuChunk {
+    pub vertex_buf: wgpu::Buffer,
+    pub index_buf: wgpu::Buffer,
+    pub index_count: u32,
+}
+
+/// Upload a meshed chunk into persistent GPU buffers. The renderer keeps
+/// these for every frame (chunk streaming re-uploads only changed chunks);
+/// the legacy per-frame `create_buffer_init` path stays for the Phase-1
+/// single-mesh API.
+pub fn upload_meshed(device: &wgpu::Device, mesh: &MeshedChunk) -> [Option<GpuChunk>; 3] {
+    let mk = |layer: &MeshLayer| -> Option<GpuChunk> {
+        if layer.indices.is_empty() {
+            return None;
+        }
+        let vertex_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("chunk-vbuf"),
+            contents: bytemuck::cast_slice(&layer.vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let index_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("chunk-ibuf"),
+            contents: bytemuck::cast_slice(&layer.indices),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+        Some(GpuChunk {
+            vertex_buf,
+            index_buf,
+            index_count: layer.indices.len() as u32,
+        })
+    };
+    [mk(&mesh.opaque), mk(&mesh.cutout), mk(&mesh.translucent)]
+}
+
+impl OverlayState {
+    const OVERLAY_VBUF_LAYOUT: wgpu::VertexBufferLayout<'static> = wgpu::VertexBufferLayout {
+        array_stride: 24,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &[
+            wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 0, shader_location: 0 },
+            wgpu::VertexAttribute { format: wgpu::VertexFormat::Unorm8x4, offset: 12, shader_location: 1 },
+            wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x2, offset: 16, shader_location: 2 },
+        ],
+    };
+
+    const INITIAL_VERTS: usize = 4096;
+    const INITIAL_INDICES: usize = 6144;
+
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        device: &wgpu::Device,
+        surface_format: wgpu::TextureFormat,
+        capture_format: wgpu::TextureFormat,
+        globals_bgl: &wgpu::BindGroupLayout,
+        globals_bind: &wgpu::BindGroup,
+    ) -> OverlayState {
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("overlay"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("overlay.wgsl").into()),
+        });
+
+        let screen_params_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("overlay-screen-bgl"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+        let screen_params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("overlay-screen-params"),
+            contents: bytemuck::bytes_of(&[0.0f32; 4]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let screen_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("overlay-screen-bg"),
+            layout: &screen_params_bgl,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: screen_params_buf.as_entire_binding(),
+            }],
+        });
+
+        let screen_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("overlay-screen-pl"),
+            bind_group_layouts: &[Some(&screen_params_bgl)],
+            immediate_size: 0,
+        });
+        let outline_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("overlay-outline-pl"),
+            bind_group_layouts: &[Some(globals_bgl)],
+            immediate_size: 0,
+        });
+
+        let mk_pipeline = |label: &'static str,
+                           layout: &wgpu::PipelineLayout,
+                           entry: &'static str,
+                           fmt: wgpu::TextureFormat,
+                           depth: Option<wgpu::DepthStencilState>| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(label),
+                layout: Some(layout),
+                vertex: wgpu::VertexState {
+                    module: &module,
+                    entry_point: Some(entry),
+                    buffers: &[Some(Self::OVERLAY_VBUF_LAYOUT)],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &module,
+                    entry_point: Some("fs"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: fmt,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    cull_mode: None,
+                    ..Default::default()
+                },
+                depth_stencil: depth,
+                multisample: Default::default(),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        let with_depth = Some(wgpu::DepthStencilState {
+            format: wgpu::TextureFormat::Depth32Float,
+            depth_write_enabled: Some(false),
+            // Outlines hug the block faces: LessEqual + a tiny bias keeps
+            // the expanded beam visible without shadow-acne flicker.
+            depth_compare: Some(wgpu::CompareFunction::LessEqual),
+            stencil: Default::default(),
+            bias: wgpu::DepthBiasState { constant: -1, slope_scale: -1.0, clamp: 0.0 },
+        });
+
+        let screen_pipeline = mk_pipeline(
+            "overlay-screen",
+            &screen_pl,
+            "vs_screen",
+            surface_format,
+            None,
+        );
+        let screen_pipeline_capture = mk_pipeline(
+            "overlay-screen-capture",
+            &screen_pl,
+            "vs_screen",
+            capture_format,
+            None,
+        );
+        let outline_pipeline = mk_pipeline(
+            "overlay-outline",
+            &outline_pl,
+            "vs_outline",
+            surface_format,
+            with_depth.clone(),
+        );
+        let outline_pipeline_capture = mk_pipeline(
+            "overlay-outline-capture",
+            &outline_pl,
+            "vs_outline",
+            capture_format,
+            with_depth,
+        );
+        let _ = globals_bind; // bound per-frame (shared); kept for clarity
+
+        // Separate buffer pairs per pass: both are written every frame.
+        let mk_bufs = |label: &'static str| {
+            (
+                device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some(label),
+                    size: (Self::INITIAL_VERTS * 24) as u64,
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }),
+                device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some(label),
+                    size: (Self::INITIAL_INDICES * 4) as u64,
+                    usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }),
+            )
+        };
+        let (screen_vbuf, screen_ibuf) = mk_bufs("overlay-screen-buf");
+        let (outline_vbuf, outline_ibuf) = mk_bufs("overlay-outline-buf");
+        OverlayState {
+            screen_params_buf,
+            screen_bind,
+            screen_pipeline,
+            screen_pipeline_capture,
+            outline_pipeline,
+            outline_pipeline_capture,
+            screen_vbuf,
+            screen_ibuf,
+            screen_vcap: Self::INITIAL_VERTS,
+            screen_icap: Self::INITIAL_INDICES,
+            screen_count: 0,
+            outline_vbuf,
+            outline_ibuf,
+            outline_vcap: Self::INITIAL_VERTS,
+            outline_icap: Self::INITIAL_INDICES,
+            outline_count: 0,
+        }
+    }
+
+    /// Grow a buffer pair when a draw list outgrew it, then upload the
+    /// list. Caps are updated in place (capacity semantics).
+    fn grow_and_upload(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        list: &client_overlay::TriList,
+        vbuf: &mut wgpu::Buffer,
+        ibuf: &mut wgpu::Buffer,
+        cap_v: &mut usize,
+        cap_i: &mut usize,
+    ) {
+        if list.vertices.len() > *cap_v || list.indices.len() > *cap_i {
+            let nv = (list.vertices.len() * 2).max(Self::INITIAL_VERTS);
+            let ni = (list.indices.len() * 2).max(Self::INITIAL_INDICES);
+            *vbuf = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("overlay-vbuf"),
+                size: (nv * 24) as u64,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            *ibuf = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("overlay-ibuf"),
+                size: (ni * 4) as u64,
+                usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            *cap_v = nv;
+            *cap_i = ni;
+        }
+        if !list.vertices.is_empty() {
+            queue.write_buffer(vbuf, 0, bytemuck::cast_slice(&list.vertices));
+            queue.write_buffer(ibuf, 0, bytemuck::cast_slice(&list.indices));
+        }
+    }
+
+    /// Upload the pending draw lists and record how much to draw.
+    fn upload_frame(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        screen: &client_overlay::TriList,
+        outline: &client_overlay::TriList,
+    ) {
+        let Self {
+            screen_vbuf,
+            screen_ibuf,
+            screen_vcap,
+            screen_icap,
+            screen_count,
+            outline_vbuf,
+            outline_ibuf,
+            outline_vcap,
+            outline_icap,
+            outline_count,
+            ..
+        } = self;
+        Self::grow_and_upload(device, queue, screen, screen_vbuf, screen_ibuf, screen_vcap, screen_icap);
+        *screen_count = screen.indices.len() as u32;
+        Self::grow_and_upload(device, queue, outline, outline_vbuf, outline_ibuf, outline_vcap, outline_icap);
+        *outline_count = outline.indices.len() as u32;
+    }
+}
+
 /// Sun direction for a fraction of the day. The path is a great circle
 /// through the zenith tilted by `sun_path_rotation_deg` (Noble's
 /// `sunPathRotation` convention: rotation of the celestial plane).
@@ -301,6 +646,9 @@ pub struct Renderer {
     pipelines: LayerPipelines,
     globals_buf: wgpu::Buffer,
     globals_bind: wgpu::BindGroup,
+    /// Kept for late pipeline construction (overlay outline pass binds the
+    /// same globals layout).
+    globals_bgl: wgpu::BindGroupLayout,
     depth_view: wgpu::TextureView,
     depth_size: (u32, u32),
     anims: Vec<AnimSlot>,
@@ -327,18 +675,36 @@ pub struct Renderer {
     /// World lighting + relit mesh for the deferred stage's lightmap input.
     world_light: Option<LightGrid>,
     mesh_lighting: Option<MeshedChunk>,
+    /// Streaming chunks: persistent GPU buffers keyed by chunk position.
+    /// Drawn every frame in addition to (or instead of) the legacy mesh.
+    chunks: std::collections::HashMap<ChunkPos, [Option<GpuChunk>; 3]>,
+    /// Day fraction (0..1) the client drives for the day/night cycle. `None`
+    /// keeps the configured/pack sun angle (Phase-2 behavior).
+    day_fraction: Option<f32>,
+    /// Server-tick counter from the client (drives animation + day cycle).
+    tick: u64,
+    /// HUD + overlay GPU state (None until the first `set_overlay`).
+    overlay: Option<OverlayState>,
+    /// Pending overlay geometry for the next frame (set by `set_overlay`).
+    pending_overlay: Option<HudDraw>,
 }
 
 /// Offscreen targets for the scene path (both legacy and staged share these;
 /// the staged path uses lightmap + lit, the legacy path only albedo+depth).
 struct SceneTargets {
     /// Albedo + face shade (Rgba8UnormSrgb); legacy post input.
+    /// The textures are never read directly — every consumer goes through
+    /// the views below — but they own the GPU memory, so dropping them
+    /// would invalidate the views.
+    #[allow(dead_code)]
     albedo: wgpu::Texture,
     albedo_view: wgpu::TextureView,
     /// (sky, block) light levels; alpha doubles as the water marker.
+    #[allow(dead_code)]
     lightmap: wgpu::Texture,
     lightmap_view: wgpu::TextureView,
     /// Lighting-stage output (post pass input when staging), Rgba8UnormSrgb.
+    #[allow(dead_code)]
     lit: wgpu::Texture,
     lit_view: wgpu::TextureView,
     depth_view: wgpu::TextureView,
@@ -374,6 +740,8 @@ struct GbufferPipelines {
 }
 
 struct ShadowMap {
+    /// Kept alive for `view` (same ownership rule as SceneTargets).
+    #[allow(dead_code)]
     tex: wgpu::Texture,
     view: wgpu::TextureView,
     #[allow(dead_code)]
@@ -757,6 +1125,7 @@ impl Renderer {
             pipelines,
             globals_buf,
             globals_bind,
+            globals_bgl,
             depth_view,
             depth_size: (width.max(1), height.max(1)),
             anims,
@@ -773,6 +1142,11 @@ impl Renderer {
             staged: None,
             world_light: None,
             mesh_lighting: None,
+            chunks: Default::default(),
+            day_fraction: None,
+            tick: 0,
+            overlay: None,
+            pending_overlay: None,
         }
         .with_staged()
     }
@@ -858,6 +1232,7 @@ impl Renderer {
 
     /// Render one frame (window mode only; headless renderers capture).
     pub fn render(&mut self, meshes: &MeshedChunk, camera: &Camera, tick: u64) {
+        self.tick = tick;
         let Some(surface) = &self.surface else { return };
         let frame = match surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
@@ -1037,6 +1412,10 @@ impl Renderer {
                 self.rebind_post_to_lit();
                 self.record_post_pass(encoder, view, &post);
             }
+            // Overlays: outlines depth-test against the staged scene depth;
+            // the HUD draws over the composited frame.
+            let scene_depth = self.scene.as_ref().map(|s| s.depth_view.clone());
+            self.record_overlays(encoder, view, scene_depth.as_ref(), to_window);
             return;
         }
 
@@ -1067,6 +1446,8 @@ impl Renderer {
             } {
                 self.record_post_pass(encoder, view, &post);
             }
+            let scene_depth = self.scene.as_ref().map(|s| s.depth_view.clone());
+            self.record_overlays(encoder, view, scene_depth.as_ref(), to_window);
             return;
         }
 
@@ -1095,6 +1476,12 @@ impl Renderer {
             };
             self.record_scene(&mut rpass, meshes, pipes);
         }
+        let direct_depth = if to_window {
+            Some(self.depth_view.clone())
+        } else {
+            None
+        };
+        self.record_overlays(encoder, view, direct_depth.as_ref(), to_window);
     }
 
     /// Frame dimensions for window vs capture targets.
@@ -1127,7 +1514,14 @@ impl Renderer {
         let config = staged.config.clone();
 
         // --- Lighting uniforms --------------------------------------------
-        let (sun, elev) = sun_state(config.sun_angle, config.sun_path_rotation_deg);
+        // Day/night cycle: the client supplies a day fraction (0..1); the
+        // configured sun_angle becomes the phase within it. Without a cycle
+        // (tests, captures) the configured angle is used directly.
+        let sun_angle = match self.day_fraction {
+            Some(day) => (day + config.sun_angle).fract(),
+            None => config.sun_angle,
+        };
+        let (sun, elev) = sun_state(sun_angle, config.sun_path_rotation_deg);
         let mut flags = 0u32;
         if config.ssao.is_some() { flags |= effect_flags::SSAO; }
         if config.shadows.is_some() { flags |= effect_flags::SHADOWS; }
@@ -1147,11 +1541,13 @@ impl Renderer {
                 0,
             ],
             camera: [camera.pos[0], camera.pos[1], camera.pos[2], tick as f32 / 20.0],
+            // daylight rides in atmosphere.w (ambient strength): dusk/night
+            // dims ambient so the world darkens smoothly.
             sun_dir: [sun[0], sun[1], sun[2], elev],
             atmosphere: [
                 config.atmosphere.as_ref().map(|a| a.mie_g).unwrap_or(0.76),
                 config.atmosphere.as_ref().map(|a| a.sun_illuminance).unwrap_or(30.0),
-                1.0, // ambient strength
+                ambient_for_sun(elev),
                 0.0,
             ],
             rayleigh: config
@@ -1278,6 +1674,17 @@ impl Renderer {
                 let mesh = self.mesh_lighting.as_ref().unwrap_or(meshes);
                 spass.set_bind_group(0, &sun_bind, &[]);
                 let gbuffer = &self.staged.as_ref().unwrap().gbuffer;
+                // Streaming chunks cast shadows too (persistent buffers).
+                for gpu in self.chunks.values() {
+                    for layer in [&gpu[0], &gpu[1]] {
+                        let Some(g) = layer else { continue };
+                        spass.set_pipeline(&shadow_pipe);
+                        spass.set_bind_group(1, &gbuffer.atlas_bind, &[]);
+                        spass.set_vertex_buffer(0, g.vertex_buf.slice(..));
+                        spass.set_index_buffer(g.index_buf.slice(..), wgpu::IndexFormat::Uint32);
+                        spass.draw_indexed(0..g.index_count, 0, 0..1);
+                    }
+                }
                 for layer in [&mesh.opaque, &mesh.cutout] {
                     // Water does not cast (fs_shadow discards it anyway).
                     if layer.indices.is_empty() {
@@ -1326,6 +1733,24 @@ impl Renderer {
             let mesh = self.mesh_lighting.as_ref().unwrap_or(meshes);
             rpass.set_bind_group(0, &self.globals_bind, &[]);
             let gbuffer = &self.staged.as_ref().unwrap().gbuffer;
+            // Streaming chunks (persistent buffers) into the gbuffer.
+            {
+                let gbuffer = &self.staged.as_ref().unwrap().gbuffer;
+                for (pipe, slot) in [
+                    (&gbuffer.opaque, 0usize),
+                    (&gbuffer.cutout, 1),
+                    (&gbuffer.translucent, 2),
+                ] {
+                    for gpu in self.chunks.values() {
+                        let Some(g) = &gpu[slot] else { continue };
+                        rpass.set_pipeline(pipe);
+                        rpass.set_bind_group(1, &gbuffer.atlas_bind, &[]);
+                        rpass.set_vertex_buffer(0, g.vertex_buf.slice(..));
+                        rpass.set_index_buffer(g.index_buf.slice(..), wgpu::IndexFormat::Uint32);
+                        rpass.draw_indexed(0..g.index_count, 0, 0..1);
+                    }
+                }
+            }
             for (pipe, layer) in [
                 (&gbuffer.opaque, &mesh.opaque),
                 (&gbuffer.cutout, &mesh.cutout),
@@ -1388,8 +1813,10 @@ impl Renderer {
     ) {
         rpass.set_bind_group(0, &self.globals_bind, &[]);
 
-        // Per-layer buffer upload (Phase 1 keeps it simple; persistent
-        // buffers arrive with the chunk-streaming milestone).
+        // Streaming chunks first (persistent buffers; zero per-frame alloc).
+        self.record_chunks(rpass, pipes);
+
+        // The legacy single mesh (Phase-1 validation scene API).
         for (pipe, layer) in [
             (&pipes.opaque, &meshes.opaque),
             (&pipes.cutout, &meshes.cutout),
@@ -1416,7 +1843,106 @@ impl Renderer {
         }
     }
 
+    /// Draw every streamed chunk through one pipeline set (opaque, cutout,
+    /// translucent). Buffers are persistent — no per-frame allocation.
+    fn record_chunks(&self, rpass: &mut wgpu::RenderPass<'_>, pipes: &LayerPipelines) {
+        for gpu in self.chunks.values() {
+            for (pipe, layer) in [
+                (&pipes.opaque, &gpu[0]),
+                (&pipes.cutout, &gpu[1]),
+                (&pipes.translucent, &gpu[2]),
+            ] {
+                let Some(g) = layer else { continue };
+                rpass.set_pipeline(pipe);
+                rpass.set_bind_group(1, &pipes.atlas_bind, &[]);
+                rpass.set_vertex_buffer(0, g.vertex_buf.slice(..));
+                rpass.set_index_buffer(g.index_buf.slice(..), wgpu::IndexFormat::Uint32);
+                rpass.draw_indexed(0..g.index_count, 0, 0..1);
+            }
+        }
+    }
+
     const SKY: wgpu::Color = wgpu::Color { r: 0.62, g: 0.8, b: 1.0, a: 1.0 };
+
+    /// Draw the pending overlay: world-space outlines first (depth-tested
+    /// against the scene depth) inside their own pass, then the screen-space
+    /// HUD over the finished frame. Both load the target (no clear).
+    fn record_overlays(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        depth_view: Option<&wgpu::TextureView>,
+        to_window: bool,
+    ) {
+        let Some(pending) = self.pending_overlay.take() else { return };
+        let (fw, fh) = self.frame_dims(to_window);
+        let Some(ov) = &mut self.overlay else { return };
+        // Screen-size uniform (UI px → NDC); zw slots unused.
+        self.queue.write_buffer(
+            &ov.screen_params_buf,
+            0,
+            bytemuck::bytes_of(&[fw as f32, fh as f32, 0.0, 0.0]),
+        );
+        OverlayState::upload_frame(
+            ov,
+            &self.device,
+            &self.queue,
+            &pending.screen,
+            &pending.world,
+        );
+
+        // World-space outlines + particles (depth-tested, no depth writes).
+        if ov.outline_count > 0 {
+            let pipe = if to_window {
+                &ov.outline_pipeline
+            } else {
+                &ov.outline_pipeline_capture
+            };
+            let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("overlay-outline"),
+                multiview_mask: None,
+                color_attachments: &[Some(Self::color_attachment_load(target))],
+                depth_stencil_attachment: depth_view.map(|v| wgpu::RenderPassDepthStencilAttachment {
+                    view: v,
+                    // Load the scene depth (test against the world); no writes.
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            rpass.set_pipeline(pipe);
+            rpass.set_bind_group(0, &self.globals_bind, &[]);
+            rpass.set_vertex_buffer(0, ov.outline_vbuf.slice(..));
+            rpass.set_index_buffer(ov.outline_ibuf.slice(..), wgpu::IndexFormat::Uint32);
+            rpass.draw_indexed(0..ov.outline_count, 0, 0..1);
+        }
+
+        // Screen-space HUD last (over everything; no depth attachment).
+        if ov.screen_count > 0 {
+            let pipe = if to_window {
+                &ov.screen_pipeline
+            } else {
+                &ov.screen_pipeline_capture
+            };
+            let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("overlay-screen"),
+                multiview_mask: None,
+                color_attachments: &[Some(Self::color_attachment_load(target))],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            rpass.set_pipeline(pipe);
+            rpass.set_bind_group(0, &ov.screen_bind, &[]);
+            rpass.set_vertex_buffer(0, ov.screen_vbuf.slice(..));
+            rpass.set_index_buffer(ov.screen_ibuf.slice(..), wgpu::IndexFormat::Uint32);
+            rpass.draw_indexed(0..ov.screen_count, 0, 0..1);
+        }
+    }
 
     /// Shared color attachment (sky clear color).
     fn color_attachment<'a>(view: &'a wgpu::TextureView) -> wgpu::RenderPassColorAttachment<'a> {
@@ -1426,6 +1952,19 @@ impl Renderer {
             depth_slice: None,
             ops: wgpu::Operations {
                 load: wgpu::LoadOp::Clear(Self::SKY),
+                store: wgpu::StoreOp::Store,
+            },
+        }
+    }
+
+    /// Color attachment that LOADS the previous content (overlay passes).
+    fn color_attachment_load<'a>(view: &'a wgpu::TextureView) -> wgpu::RenderPassColorAttachment<'a> {
+        wgpu::RenderPassColorAttachment {
+            view,
+            resolve_target: None,
+            depth_slice: None,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Load,
                 store: wgpu::StoreOp::Store,
             },
         }
@@ -1686,6 +2225,45 @@ impl Renderer {
     pub fn set_world_lighting(&mut self, light: LightGrid, mesh: MeshedChunk) {
         self.world_light = Some(light);
         self.mesh_lighting = Some(mesh);
+    }
+
+    /// Insert (or replace) one streaming chunk's GPU buffers.
+    pub fn set_chunk(&mut self, pos: ChunkPos, mesh: MeshedChunk) {
+        let gpu = upload_meshed(&self.device, &mesh);
+        self.chunks.insert(pos, gpu);
+    }
+
+    /// Drop a streamed chunk (unload / out of view distance).
+    pub fn drop_chunk(&mut self, pos: ChunkPos) {
+        self.chunks.remove(&pos);
+    }
+
+    /// Enable the day/night cycle at `fraction` (0..1: 0 sunrise, 0.25 noon,
+    /// 0.5 sunset, 0.75 midnight). Pass `None` to pin the configured sun.
+    pub fn set_day_fraction(&mut self, fraction: Option<f32>) {
+        self.day_fraction = fraction.map(|f| f.rem_euclid(1.0));
+    }
+
+    /// Number of streamed chunks currently uploaded.
+    pub fn streamed_chunks(&self) -> usize {
+        self.chunks.len()
+    }
+
+    /// Queue the overlay geometry for the next frame (HUD + world-space
+    /// outlines/particles). Empty lists simply draw nothing — passing an
+    /// all-empty `HudDraw` every frame is valid (and hides the overlay).
+    /// Lazily initializes the overlay GPU state on first call.
+    pub fn set_overlay(&mut self, draw: HudDraw) {
+        if self.overlay.is_none() {
+            self.overlay = Some(OverlayState::new(
+                &self.device,
+                self.surface_config.format,
+                wgpu::TextureFormat::Rgba8UnormSrgb,
+                &self.globals_bgl,
+                &self.globals_bind,
+            ));
+        }
+        self.pending_overlay = Some(draw);
     }
 
     /// Change quality at runtime (also used by the F4 hotkey). Clears any
@@ -2165,12 +2743,57 @@ fn sun_view_proj(cam_pos: [f32; 3], sun: &[f32; 3], distance: f32) -> ([[f32; 4]
     (compose(proj, view), extent)
 }
 
+/// Ambient strength from sun elevation (day/night dimming). 1.0 in full
+/// daylight, easing to a small moonlit floor after sunset. Smooth over the
+/// dusk band so the transition never pops.
+fn ambient_for_sun(elev_sin: f32) -> f32 {
+    const DAY: f32 = 0.18; // elevation sin above which it is fully day
+    const NIGHT: f32 = -0.12; // below which it is fully night
+    let t = ((elev_sin - NIGHT) / (DAY - NIGHT)).clamp(0.0, 1.0);
+    let smooth = t * t * (3.0 - 2.0 * t);
+    0.12 + 0.88 * smooth
+}
+
 fn mip_concat(atlas: &Atlas) -> Vec<u8> {
     let mut out = atlas.pixels.clone();
     for m in &atlas.mips {
         out.extend_from_slice(m);
     }
     out
+}
+
+/// Atlas lookup table for streaming: SpriteId → (x, y, frame_w, frame_h,
+/// frames, stride, fully-opaque-sprite). `'static`: owns a copy of the
+/// sprite-name list and the per-entry opacity data, so the client's streamer
+/// needs no borrow of the registry or atlas. Mirrors `build_meshes` exactly
+/// (same opacity rule: a sprite is opaque only if every texel is opaque).
+pub fn sprite_uv_table(
+    registry: &Registry,
+    atlas: &Atlas,
+) -> std::sync::Arc<dyn Fn(u32) -> Option<(u32, u32, u32, u32, u32, u32, bool)> + Send + Sync> {
+    use std::sync::Arc;
+    let names: Vec<(String, String)> = registry.sprite_names().to_vec();
+    // Per-entry opacity, computed once (avoids re-scanning atlas pixels per
+    // lookup during streaming).
+    let opaque: Vec<bool> = names
+        .iter()
+        .map(|name| {
+            atlas
+                .get(&name.0, &name.1)
+                .map(|e| atlas_opaque(atlas, e))
+                .unwrap_or(false)
+        })
+        .collect();
+    let entries: Vec<Option<(u32, u32, u32, u32, u32, u32, bool)>> = names
+        .iter()
+        .zip(opaque)
+        .map(|(name, opaque)| {
+            atlas.get(&name.0, &name.1).map(|e| {
+                (e.x, e.y, e.frame_w, e.frame_h, e.frames, e.frame_stride, opaque)
+            })
+        })
+        .collect();
+    Arc::new(move |sprite_id: u32| entries.get(sprite_id as usize).copied().flatten())
 }
 
 /// Build meshes for a world (used by the client).

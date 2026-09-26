@@ -27,6 +27,10 @@ feathered-cache.bin
 # Temporary screenshots and debug artifacts written to the repo root
 /*.png
 
+# Generated sandbox worlds (player saves; user data, never committed)
+/world/
+/worlds/
+
 # Binaries and debug symbols that escape the build directory
 *.exe
 *.dll

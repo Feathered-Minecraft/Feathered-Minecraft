@@ -1,7 +1,12 @@
 //! World grid: a flat block-state array with neighbor queries.
-//! Phase 1 uses one flat world (no section streaming).
+//! Phase 1 uses one flat world (no section streaming); Phase 3 adds the
+//! chunked container (`crate::chunks::ChunkedWorld`) and a shared world
+//! height (`WORLD_H`) used by chunk generation and physics bounds.
 
-/// World dimensions in blocks (Phase 1 validation scene size).
+/// World height in blocks (shared by the flat grid and chunked world).
+pub const WORLD_H: u32 = 128;
+
+/// Phase-1 validation scene size (flat `World`).
 pub const WORLD_X: u32 = 32;
 pub const WORLD_Y: u32 = 16;
 pub const WORLD_Z: u32 = 32;

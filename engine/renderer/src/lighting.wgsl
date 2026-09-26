@@ -483,12 +483,18 @@ fn fs_lighting(in: VsOut) -> @location(0) vec4<f32> {
     let lm = textureLoad(lightmap_tex, uvi, 0);
     // Alpha channel of the lightmap target doubles as the water marker
     // (blend gbuffer writes 1.0 there; terrain writes 0.0).
+    // Streaming note: terrain fragments carry an albedo.a marker of 1.0 for
+    // "real geometry". The sky branch below must only fire for pixels with
+    // NO geometry at all; with chunk streaming the far plane can clip
+    // distant terrain, and those pixels still have a==0 marker but z==1 only
+    // when nothing was drawn — both signals agree at z==1.
+    let has_geometry = z < 1.0;
 
     let sun_dir = normalize(params.sun_dir.xyz);
     let elev = params.sun_dir.w;
 
     // --- Sky pixels ---------------------------------------------------------
-    if (z >= 1.0) {
+    if (!has_geometry) {
         var sky: vec3<f32>;
         if ((flags & 4u) != 0u) {
             // uv.y=0 is the TOP row (v convention, see vs_post). ray_tl/tr

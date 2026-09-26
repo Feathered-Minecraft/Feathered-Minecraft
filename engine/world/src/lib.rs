@@ -3,13 +3,20 @@
 //! Consumes the compiled pack (from `feathered-assets`) but performs no
 //! parsing itself. The renderer and mesher talk to this crate only.
 
+pub mod chunks;
 pub mod grid;
 pub mod light;
+pub mod physics;
+pub mod raycast;
+pub mod save;
+pub mod terrain;
 
+pub use chunks::{Chunk, ChunkPos, ChunkedWorld};
 pub use light::LightGrid;
+pub use physics::PlayerBody;
+pub use terrain::TerrainGenerator;
 
-use feathered_assets::blockstates::{ModelInstance, Occlusion, Predicate};
-use feathered_assets::compiled::{CompiledAppearance, CompiledPack};
+use feathered_assets::blockstates::{ModelInstance, Occlusion, Predicate};use feathered_assets::compiled::{CompiledAppearance, CompiledPack};
 use feathered_assets::models::ModelId;
 
 /// Appearance as seen by the mesher: borrowed view over compiled data.

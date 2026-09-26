@@ -1,12 +1,37 @@
-//! feathered-client — winit window, input, fly camera.
+//! feathered-client — winit window, input, player controller, world
+//! streaming, block interaction and the render loop.
+//!
+//! Phase 3: a playable first-person voxel sandbox. Modules:
+//! * [`input`] — keyboard/mouse state → movement intent,
+//! * [`controller`] — mouse-look + delta-time physics movement,
+//! * [`streaming`] — time-budgeted chunk load/mesh/unload around the player,
+//! * [`interaction`] — targeting (voxel raycast), break/place with cooldowns,
+//! * [`inventory`] — hotbar + slot list,
+//! * [`daycycle`] — time-of-day clock driving the renderer's sun.
+//!
+//! `scene = validation` still runs the Phase-1 ten-block scene with the
+//! fly camera (tests and screenshots pin its behavior); the default is the
+//! generated sandbox.
+
+pub mod controller;
+pub mod controls;
+pub mod daycycle;
+pub mod font;
+pub mod input;
+pub mod interaction;
+pub mod inventory;
+pub mod overlay;
+pub mod streaming;
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use feathered_assets::cache::cached_to_atlas;
+use feathered_world::chunks::ChunkPos;
 use feathered_world::grid::World;
 use feathered_world::Registry;
 use winit::application::ApplicationHandler;
-use winit::event::{ElementState, WindowEvent};
+use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowAttributes, WindowId};
@@ -26,64 +51,663 @@ pub struct RunOptions {
     /// renderer's generic `ShaderEffectConfig` — the renderer never sees pack
     /// files or pack-specific data.
     pub shader_config_path: Option<PathBuf>,
+    /// Sandbox terrain seed (default 20260926).
+    pub seed: u64,
+    /// Streaming view distance in chunks (default 6).
+    pub view_distance: i32,
+    /// Mouse sensitivity multiplier (default 1.0).
+    pub sensitivity: f32,
+    /// `sandbox` (default) or `validation` (Phase-1 fly-camera scene).
+    pub scene: SceneKind,
+    /// Day length in seconds (0 = frozen sun at the shader config's angle).
+    pub day_length: f32,
+    /// World directory for saves (default `./world`). Player edits,
+    /// position and time persist here; `--world <dir>` selects another.
+    pub world_dir: PathBuf,
+    /// Human-readable pack label for the debug screen.
+    pub pack_label: String,
+    /// Human-readable shader-pack label for the debug screen.
+    pub shader_label: Option<String>,
+    /// Autosave interval in seconds of gameplay (0 disables autosave;
+    /// the world still saves on exit).
+    pub save_interval: f32,
+    /// Whether the HUD starts visible (F1 toggles at runtime).
+    pub hud_default: bool,
 }
 
-const MOVE_SPEED: f32 = 8.0;
-const MOUSE_SENS: f32 = 0.0025;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SceneKind {
+    Sandbox,
+    Validation,
+}
+
+impl Default for RunOptions {
+    fn default() -> Self {
+        RunOptions {
+            pack_dir: PathBuf::from("texture/assets"),
+            cache_path: PathBuf::from("target/feathered-cache.bin"),
+            screenshot: None,
+            quality: feathered_renderer::RenderQuality::Medium,
+            shader_pack: None,
+            shader_config_path: None,
+            seed: 20260926,
+            view_distance: 6,
+            sensitivity: 1.0,
+            scene: SceneKind::Sandbox,
+            day_length: daycycle::DEFAULT_DAY_SECONDS,
+            world_dir: PathBuf::from("world"),
+            pack_label: String::new(),
+            shader_label: None,
+            save_interval: 30.0,
+            hud_default: true,
+        }
+    }
+}
+
+/// One frame of streaming work budget: at most this many chunk jobs per
+/// event-loop pass (generation+mesh of one 16×128×16 chunk is the dominant
+/// cost; 2/frame at 60 fps ≈ 120 chunks/s fill rate).
+const CHUNK_JOBS_PER_FRAME: usize = 2;
+
+/// Simulation tick rate driving `state.tick` (the renderer's anim clock).
+const TICKS_PER_SECOND: f32 = 20.0;
+
+enum GameMode {
+    /// Phase-1 validation scene (fly camera, fixed world). The world/mesh
+    /// live on `AppState` (`mesh` is rendered every frame; `world` is only
+    /// needed at setup).
+    Validation,
+    /// Generated sandbox (streaming chunks, physics, interaction).
+    Sandbox,
+}
 
 struct AppState {
-    window: Option<Box<dyn Window>>,
+    /// The window is shared with the renderer: the renderer consumes an
+    /// `Arc` clone when creating the wgpu surface, and the client keeps its
+    /// own clone alive for cursor capture / title updates. (Moving the only
+    /// handle into the renderer would leave every window-control path dead.)
+    window: Option<Arc<dyn Window>>,
+    /// Declared before `window`-related state so the surface is dropped
+    /// before the native window at teardown.
     renderer: Option<feathered_renderer::Renderer>,
-    #[allow(dead_code)] // kept for Phase 2 (block editing / interaction)
     registry: Registry,
-    #[allow(dead_code)]
-    atlas: feathered_assets::atlas::Atlas,
+    /// World mesh for the validation scene (empty for the sandbox, which
+    /// renders exclusively through the streamer's per-chunk uploads).
     mesh: feathered_chunk::MeshedChunk,
     camera: feathered_renderer::Camera,
-    keys: std::collections::HashSet<KeyCode>,
+    input: input::InputState,
     mouse_captured: bool,
+    focused: bool,
     last_tick: std::time::Instant,
     tick: u64,
     /// One-shot capture: render frame N, save to disk, exit.
     screenshot: Option<(u32, PathBuf)>, // (frames remaining, path)
+    // --- sandbox state ---
+    mode: GameMode,
+    controller: controller::PlayerController,
+    streamer: streaming::Streamer,
+    hotbar: inventory::Inventory,
+    interact: interaction::Interaction,
+    day: daycycle::DayCycle,
+    /// Last interaction feedback line (printed to the title bar).
+    feedback: Option<(std::time::Instant, String)>,
+    /// pending break/place intent while the mouse is held.
+    mouse_held: [bool; 2], // [left = break, right = place]
+    /// Targeted block this frame (for feedback).
+    target: Option<interaction::Target>,
+    // --- sandbox polish state ---
+    /// Pause: stops simulation (unfocus or Esc-to-pause); rendering keeps
+    /// presenting the last frame's view so the pause overlay reads.
+    paused: bool,
+    /// HUD visible (F1 toggles; screenshots keep the HUD state as-is).
+    hud_visible: bool,
+    /// F3 debug screen.
+    debug_visible: bool,
+    /// Frame-time EMA + fps counter for the debug screen.
+    frame_dt_ema: f32,
+    fps_ema: f32,
+    /// Break particles (in-world, colored from the broken block).
+    particles: Vec<overlay::Particle>,
+    /// Break progress cached for the HUD (from the interaction driver).
+    break_progress: f32,
+    /// Autosave clock (seconds of accumulated gameplay since last save).
+    save_timer: f32,
+    /// Sprint-FOV easing state (current extra FOV, radians).
+    fov_kick: f32,
+    /// Streaming center last seen (to re-queue unloads on chunk change).
+    last_center: ChunkPos,
+    /// Loaded worlds directory (save/load root).
+    world_dir: Option<PathBuf>,
+    /// Active pack / shader pack labels (debug screen).
+    pack_label: String,
+    shader_label: Option<String>,
+    /// Autosave interval (seconds of gameplay; 0 = off; save on exit too).
+    save_interval: f32,
 }
 
 impl AppState {
-    fn handle_key(&mut self, key: KeyCode, pressed: bool) {
-        if pressed {
-            self.keys.insert(key);
-        } else {
-            self.keys.remove(&key);
+    /// The streaming center for the player's current position.
+    fn stream_center(&self) -> ChunkPos {
+        self.streamer
+            .center_for(self.controller.body.pos[0], self.controller.body.pos[2])
+    }
+
+    /// Update the target raycast for this frame.
+    fn update_target(&mut self) {
+        let eye = self.controller.body.eye();
+        let dir = self.camera.forward();
+        let world = &self.streamer.world;
+        let targetable = move |x: i64, y: i64, z: i64| match world.block(x, y, z) {
+            Some((0, _)) | None => false,
+            Some(_) => true,
+        };
+        self.target = interaction::current_target(eye, dir, &targetable);
+    }
+
+    /// Run at most CHUNK_JOBS_PER_FRAME streaming jobs, uploading meshes and
+    /// baking each chunk's voxel light into its mesh before it hits the GPU.
+    fn pump_streaming(&mut self) {
+        let center = self.stream_center();
+        for _ in 0..CHUNK_JOBS_PER_FRAME {
+            match self.streamer.poll(&self.registry, center) {
+                Some(streaming::ChunkJob::Load { pos, mut mesh, .. }) => {
+                    if let Some(light) = self.streamer.lights.get(&pos) {
+                        apply_light_to_mesh(&mut mesh, light, pos);
+                    }
+                    if let Some(r) = &mut self.renderer {
+                        r.set_chunk(pos, mesh);
+                    }
+                }
+                Some(streaming::ChunkJob::Unload(pos)) => {
+                    if let Some(r) = &mut self.renderer {
+                        r.drop_chunk(pos);
+                    }
+                    self.streamer.unload(pos);
+                }
+                None => break,
+            }
         }
     }
 
-    fn update(&mut self, dt: f32) {
-        let (mut dx, mut dy, mut dz) = (0.0f32, 0.0f32, 0.0f32);
-        if self.keys.contains(&KeyCode::KeyW) { dz += 1.0; }
-        if self.keys.contains(&KeyCode::KeyS) { dz -= 1.0; }
-        if self.keys.contains(&KeyCode::KeyA) { dx -= 1.0; }
-        if self.keys.contains(&KeyCode::KeyD) { dx += 1.0; }
-        if self.keys.contains(&KeyCode::Space) { dy += 1.0; }
-        if self.keys.contains(&KeyCode::ShiftLeft) { dy -= 1.0; }
+    /// Re-mesh + re-light the chunk containing (x, z) after an edit, plus
+    /// neighbor chunks when the edit touches a border (their culling or
+    /// border light changes).
+    fn remesh_around(&mut self, x: i64, z: i64) {
+        let mut dirty: Vec<ChunkPos> = vec![ChunkPos::of_block(x, z)];
+        // Border-adjacent chunks when within 1 block of an edge.
+        let pos = ChunkPos::of_block(x, z);
+        let (bx, bz) = pos.min_block();
+        let (lx, lz) = (x - bx, z - bz);
+        if lx == 0 {
+            dirty.push(ChunkPos::new(pos.x - 1, pos.z));
+        }
+        if lx == 15 {
+            dirty.push(ChunkPos::new(pos.x + 1, pos.z));
+        }
+        if lz == 0 {
+            dirty.push(ChunkPos::new(pos.x, pos.z - 1));
+        }
+        if lz == 15 {
+            dirty.push(ChunkPos::new(pos.x, pos.z + 1));
+        }
+        for p in dirty {
+            if !self.streamer.world.contains(p) || !self.streamer.is_meshed(p) {
+                continue;
+            }
+            self.streamer.relight(&self.registry, p);
+            if let Some(mut mesh) = self.streamer.remesh(&self.registry, p) {
+                if let Some(light) = self.streamer.lights.get(&p) {
+                    apply_light_to_mesh(&mut mesh, light, p);
+                }
+                if let Some(r) = &mut self.renderer {
+                    r.set_chunk(p, mesh);
+                }
+            }
+        }
+    }
+
+    fn sandbox_update(&mut self, dt: f32) {
+        // Streaming first (ground must exist before physics probes it).
+        self.pump_streaming();
+        // Re-queue unloads when the streaming center crosses a chunk border.
+        let center = self.stream_center();
+        if center != self.last_center {
+            self.streamer.queue_unloads_around(center);
+            self.last_center = center;
+        }
+
+        // Mouse look.
+        let (dx, dy) = self.input.take_mouse();
+        let mut cam = self.camera.clone();
+        self.controller.look(dx, dy, &mut cam);
+        self.camera = cam;
+
+        // Movement + physics. The solid closure borrows only the registry
+        // and the chunk world (disjoint field borrows — the controller keeps
+        // mutable access to its own body and the camera).
+        let intent = self.input.move_intent();
+        let registry = &self.registry;
+        let world = &self.streamer.world;
+        let solid = move |x: i64, y: i64, z: i64| match world.block(x, y, z) {
+            // Unloaded space is SOLID: it walls the player in rather than
+            // letting them fall out of the streamed region.
+            None => true,
+            Some((0, _)) => false,
+            Some((id, sid)) => registry
+                .block_by_id(id)
+                .and_then(|b| b.state(sid))
+                .map(|s| s.occlusion.hides_neighbor())
+                .unwrap_or(false),
+        };
+        let mut cam = self.camera;
+        self.controller.update(dt, &intent, &mut cam, &solid);
+        self.camera = cam;
+
+        // Sprint FOV feedback: ease the kick toward the desired value.
+        let want_kick = if intent.sprint && intent.is_moving() {
+            controller::SPRINT_FOV_KICK
+        } else {
+            0.0
+        };
+        let rate = (controller::SPRINT_FOV_KICK / 0.15) * dt; // ~0.15 s ease
+        self.fov_kick = if want_kick > self.fov_kick {
+            (self.fov_kick + rate).min(want_kick)
+        } else {
+            (self.fov_kick - rate).max(want_kick)
+        };
+        self.camera.fov_y = 70.0f32.to_radians() + self.fov_kick;
+
+        // Day cycle drives the renderer's sun (real sun direction + sky).
+        self.day.advance(dt);
+        if let Some(r) = &mut self.renderer {
+            r.set_day_fraction(Some(self.day.fraction));
+        }
+
+        // Interaction: cooldown tick, then act on held buttons.
+        self.interact.tick(dt);
+        self.update_target();
+        self.break_progress = 0.0;
+        if let Some(target) = self.target.clone() {
+            if self.mouse_held[0] {
+                // Mining: progress accumulates while aiming at the same block.
+                // The block id is read once per frame up front (avoids holding
+                // an immutable borrow while the break closure mutates).
+                let aimed = self
+                    .streamer
+                    .block_with_edits(target.hit.x, target.hit.y, target.hit.z)
+                    .map(|(b, _)| b);
+                let ev = self.interact.update_break(
+                    &target,
+                    dt,
+                    &move |_, _, _| aimed,
+                    &mut |x, y, z| {
+                        // Only break inside loaded chunks; never the bottom layer.
+                        if y <= 0 {
+                            return false;
+                        }
+                        let world = &mut self.streamer.world;
+                        world.block(x, y, z).map(|(b, _)| b != 0).unwrap_or(false)
+                            && world.set(x, y, z, 0, 0)
+                    },
+                );
+                self.break_progress = self.interact.progress();
+                if let Some(interaction::InteractionEvent::Broke(x, y, z)) = ev {
+                    self.remesh_around(x, z);
+                    self.record_edit(x, y, z, 0, 0);
+                    // Particle burst colored from the block's sprite tint.
+                    let color = self.block_color(x, y, z);
+                    overlay::spawn_burst(&mut self.particles, x, y, z, color, (x as u64) ^ ((y as u64) << 21) ^ ((z as u64) << 42));
+                    self.feedback = Some((
+                        std::time::Instant::now(),
+                        format!("broke block at {x},{y},{z}"),
+                    ));
+                }
+            } else {
+                self.interact.reset_progress();
+            }
+            if self.mouse_held[1] {
+                if let Some(block) = self.hotbar.selected_block().map(str::to_string) {
+                    let feet = self.controller.body.pos;
+                    let ev = self.interact.try_place(
+                        &target,
+                        &block,
+                        &self.registry,
+                        feet,
+                        feathered_world::grid::WORLD_H,
+                        &mut |x, y, z, b, s| {
+                            // Cell must be empty and inside a loaded chunk.
+                            let world = &mut self.streamer.world;
+                            matches!(world.block(x, y, z), Some((0, _))) && world.set(x, y, z, b, s)
+                        },
+                    );
+                    if let Some(interaction::InteractionEvent::Placed(x, y, z)) = ev {
+                        self.remesh_around(x, z);
+                        let id = self.registry.block_id(&block).unwrap_or(0);
+                        self.record_edit(x, y, z, id, 0);
+                        self.feedback = Some((
+                            std::time::Instant::now(),
+                            format!("placed {block} at {x},{y},{z}"),
+                        ));
+                    }
+                }
+            }
+        } else {
+            self.interact.reset_progress();
+        }
+
+        // Hotbar wheel.
+        let wheel = self.input.take_wheel();
+        if wheel != 0 {
+            self.hotbar.cycle(wheel);
+            if let Some(block) = self.hotbar.selected_block() {
+                self.feedback = Some((
+                    std::time::Instant::now(),
+                    format!("selected: {block}"),
+                ));
+            }
+        }
+
+        // Break particles.
+        overlay::step_particles(&mut self.particles, dt);
+
+        // Autosave.
+        self.save_timer += dt;
+        let interval = self.save_interval;
+        if interval > 0.0 && self.save_timer >= interval {
+            self.save_world();
+        }
+
+        self.tick += (dt * TICKS_PER_SECOND) as u64;
+    }
+
+    /// Record an edit into the streaming journal (persistence).
+    fn record_edit(&mut self, x: i64, y: i64, z: i64, block: u32, state: u32) {
+        self.streamer.record_edit(x, y, z, block, state);
+    }
+
+    /// Deterministic particle tint for the block at (x, y, z): derive a
+    /// stable pseudo-color from the block's particle sprite id (cheap and
+    /// pack-dependent without touching GPU data).
+    fn block_color(&self, x: i64, y: i64, z: i64) -> [u8; 4] {
+        const FALLBACK: [u8; 4] = [125, 125, 125, 255];
+        let Some((id, sid)) = self.streamer.block_with_edits(x, y, z) else {
+            return FALLBACK;
+        };
+        let Some(def) = self.registry.block_by_id(id) else {
+            return FALLBACK;
+        };
+        let name = def.name.clone();
+        let particle_sprite = self
+            .registry
+            .model_of(&name, sid)
+            .map(|m| m.particle)
+            .unwrap_or(feathered_assets::models::SpriteId(u32::MAX));
+        // Hash the sprite id into a mid-tone, block-distinct color.
+        let h = (particle_sprite.0 as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        let r = 90 + (h & 0x3F) as u8;
+        let g = 90 + ((h >> 8) & 0x3F) as u8;
+        let b = 90 + ((h >> 16) & 0x3F) as u8;
+        [r, g, b, 255]
+    }
+
+    /// Snapshot the session into a `WorldSave` (metadata + edit journal).
+    fn build_world_save(&self) -> feathered_world::save::WorldSave {
+        let meta = feathered_world::save::WorldMeta {
+            seed: self.streamer.seed(),
+            player: feathered_world::save::PlayerSave {
+                pos: [
+                    self.controller.body.pos[0] as f64,
+                    self.controller.body.pos[1] as f64,
+                    self.controller.body.pos[2] as f64,
+                ],
+                yaw: self.camera.yaw,
+                pitch: self.camera.pitch,
+            },
+            day_fraction: Some(self.day.fraction),
+            saved_at_unix: Some(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0),
+            ),
+        };
+        self.streamer.build_save(meta).1
+    }
+
+    /// Atomic-save the world (journal + metadata). Feedback on failure only
+    /// — a failed autosave must never crash gameplay.
+    fn save_world(&mut self) -> bool {
+        let Some(dir) = self.world_dir.clone() else { return false };
+        let save = self.build_world_save();
+        match feathered_world::save::save_to_dir(&dir, &save) {
+            Ok(_) => {
+                self.streamer.mark_saved();
+                self.save_timer = 0.0;
+                true
+            }
+            Err(e) => {
+                self.feedback = Some((
+                    std::time::Instant::now(),
+                    format!("save failed: {e}"),
+                ));
+                false
+            }
+        }
+    }
+
+    /// Build the screen-space HUD draw list (crosshair, hotbar, progress,
+    /// feedback line, debug screen). Pure authoring — the renderer uploads.
+    fn build_hud(&self) -> feathered_renderer::HudDraw {
+        let mut draw = overlay::HudLists::default();
+        if !self.hud_visible && !self.debug_visible {
+            return convert_hud(draw);
+        }
+        let (w, h) = (
+            self.window
+                .as_ref()
+                .map(|w| w.surface_size().width as f32)
+                .unwrap_or(1280.0),
+            self.window
+                .as_ref()
+                .map(|w| w.surface_size().height as f32)
+                .unwrap_or(720.0),
+        );
+
+        // Crosshair only when a target or aim makes sense (always in the
+        // sandbox; the validation scene has no HUD by design).
+        if self.hud_visible {
+            overlay::build_crosshair(&mut draw.screen, w, h);
+            if self.break_progress > 0.0 {
+                overlay::build_progress(&mut draw.screen, w, h, self.break_progress);
+            }
+            let rects = overlay::build_hotbar(&mut draw.screen, w, h, self.hotbar.selected);
+            // Slot numbers + selected block name.
+            for (i, r) in rects.iter().enumerate() {
+                let label = (i + 1).to_string();
+                let glyphs = overlay::centered_text(&label, *r, 1.5);
+                for (ch, pos) in glyphs {
+                    font::draw_text(
+                        &mut draw.screen,
+                        &ch.to_string(),
+                        pos[0],
+                        pos[1],
+                        1.5,
+                        [200, 200, 200, 220],
+                    );
+                }
+            }
+            if let Some(name) = self.hotbar.selected_block() {
+                font::draw_text_shadow(
+                    &mut draw.screen,
+                    name,
+                    w / 2.0 - font::text_width(name, 2.0) / 2.0,
+                    h - 46.0 - 14.0 - 24.0,
+                    2.0,
+                    [240, 240, 240, 235],
+                );
+            }
+            // Feedback line (recent interaction).
+            if let Some((t, msg)) = &self.feedback {
+                if t.elapsed().as_secs_f32() < 3.0 {
+                    font::draw_text_shadow(
+                        &mut draw.screen,
+                        msg,
+                        w / 2.0 - font::text_width(msg, 1.5) / 2.0,
+                        h / 2.0 + 44.0,
+                        1.5,
+                        [230, 230, 230, 220],
+                    );
+                }
+            }
+            if self.paused {
+                font::draw_text_shadow(
+                    &mut draw.screen,
+                    "PAUSED",
+                    w / 2.0 - font::text_width("PAUSED", 4.0) / 2.0,
+                    h / 2.0 - 60.0,
+                    4.0,
+                    [255, 220, 120, 240],
+                );
+            }
+        }
+
+        // F3 debug screen (top-left stack).
+        if self.debug_visible {
+            let pos = self.controller.body.pos;
+            let chunk = ChunkPos::of_block(pos[0].floor() as i64, pos[2].floor() as i64);
+            let st = self.streamer.stats();
+            let fps = self.fps_ema;
+            let lines = [
+                format!("FEATHERED {fps:.0} FPS ({:.1} MS)", self.frame_dt_ema * 1000.0),
+                format!(
+                    "XYZ {:.2} / {:.2} / {:.2}",
+                    pos[0], pos[1], pos[2]
+                ),
+                format!(
+                    "CHUNK {} {}  IN {:?} {:?}",
+                    chunk.x,
+                    chunk.z,
+                    ((pos[0].floor() as i64) & 15),
+                    ((pos[2].floor() as i64) & 15)
+                ),
+                format!(
+                    "CHUNKS LOADED {} MESHED {} UNLOAD-Q {}",
+                    st.loaded, st.meshed, st.unload_pending
+                ),
+                format!(
+                    "LOADS {} UNLOADS {} EDITS {}",
+                    st.loads_total, st.unloads_total, st.edits
+                ),
+                format!(
+                    "GPU CHUNKS {}",
+                    self.renderer.as_ref().map(|r| r.streamed_chunks()).unwrap_or(0)
+                ),
+                format!("SEED {}", self.streamer.seed()),
+                format!(
+                    "TIME {:.3} ({})",
+                    self.day.fraction,
+                    if self.day.is_night() { "NIGHT" } else { "DAY" }
+                ),
+                format!("QUALITY {:?}", self.renderer.as_ref().map(|r| r.settings().quality).unwrap_or(feathered_renderer::RenderQuality::Medium)),
+                format!("PACK {}", self.pack_label),
+                format!(
+                    "SHADER {}",
+                    self.shader_label.as_deref().unwrap_or("(none)")
+                ),
+                format!("SAVE {}", if self.save_timer > 0.0 { "PENDING" } else { "OK" }),
+            ];
+            for (i, line) in lines.iter().enumerate() {
+                font::draw_text_shadow(
+                    &mut draw.screen,
+                    line,
+                    8.0,
+                    8.0 + i as f32 * 14.0,
+                    1.5,
+                    [235, 235, 235, 230],
+                );
+            }
+        }
+        convert_hud(draw)
+    }
+
+    fn validation_update(&mut self, dt: f32) {
+        let (mut dx, mut dz, mut dy) = (0.0f32, 0.0f32, 0.0f32);
+        if self.input.key_down(KeyCode::KeyW) { dz += 1.0; }
+        if self.input.key_down(KeyCode::KeyS) { dz -= 1.0; }
+        if self.input.key_down(KeyCode::KeyA) { dx -= 1.0; }
+        if self.input.key_down(KeyCode::KeyD) { dx += 1.0; }
+        if self.input.key_down(KeyCode::Space) { dy += 1.0; }
+        if self.input.key_down(KeyCode::ShiftLeft) { dy -= 1.0; }
 
         let (sin_y, cos_y) = self.camera.yaw.sin_cos();
         let forward = [sin_y, 0.0, -cos_y];
         let right = [cos_y, 0.0, sin_y];
         for (i, axis) in [forward, right].iter().enumerate() {
             let amount = if i == 0 { dz } else { dx };
-            self.camera.pos[i] += axis[i] * amount * MOVE_SPEED * dt;
+            self.camera.pos[i] += axis[i] * amount * 8.0 * dt;
         }
-        self.camera.pos[1] += dy * MOVE_SPEED * dt;
+        self.camera.pos[1] += dy * 8.0 * dt;
+        self.tick += (dt * TICKS_PER_SECOND) as u64;
     }
+}
+
+/// Convert client-authored HUD lists into the renderer's POD mirror types
+/// (the crates are deliberately decoupled; the layout is const-asserted on
+/// both sides).
+fn convert_hud(lists: overlay::HudLists) -> feathered_renderer::HudDraw {
+    let conv = |l: overlay::TriList| -> feathered_renderer::client_overlay::TriList {
+        feathered_renderer::client_overlay::TriList {
+            vertices: l
+                .vertices
+                .iter()
+                .map(|v| feathered_renderer::client_overlay::HudVertex {
+                    pos: v.pos,
+                    color: v.color,
+                    px: v.px,
+                })
+                .collect(),
+            indices: l.indices,
+        }
+    };
+    feathered_renderer::HudDraw {
+        screen: conv(lists.screen),
+        world: conv(lists.world),
+    }
+}
+
+/// Overwrite each vertex's baked light with the voxel light of the block the
+/// vertex sits in (sky, block — levels 0..15 stored raw, like
+/// `build_lighting_meshes` does for the validation scene).
+fn apply_light_to_mesh(
+    mesh: &mut feathered_chunk::MeshedChunk,
+    grid: &feathered_world::LightGrid,
+    pos: ChunkPos,
+) {
+    let (bx, bz) = pos.min_block();
+    for layer in [&mut mesh.opaque, &mut mesh.cutout, &mut mesh.translucent] {
+        for v in &mut layer.vertices {
+            let x = (v.pos[0].floor() as i64).clamp(bx, bx + 15);
+            let z = (v.pos[2].floor() as i64).clamp(bz, bz + 15);
+            let y = (v.pos[1].floor() as i64).clamp(0, feathered_world::grid::WORLD_H as i64 - 1);
+            v.light = grid.get(x, y, z).unwrap_or([15, 0]);
+        }
+    }
+}
+
+/// Launch the game (sandbox by default, `--scene validation` for Phase 1).
+pub fn run(opts: RunOptions) -> Result<(), Box<dyn std::error::Error>> {
+    let event_loop = EventLoop::new()?;
+    let app = App {
+        state: None,
+        opts,
+    };
+    event_loop.run_app(app)?;
+    Ok(())
 }
 
 struct App {
     state: Option<AppState>,
-    cache_path: PathBuf,
-    screenshot: Option<PathBuf>,
-    quality: feathered_renderer::RenderQuality,
-    shader_pack: Option<String>,
-    shader_config_path: Option<PathBuf>,
+    opts: RunOptions,
 }
 
 impl ApplicationHandler for App {
@@ -92,15 +716,17 @@ impl ApplicationHandler for App {
             return;
         }
         let attrs = WindowAttributes::default()
-            .with_title("Feathered — Phase 1 validation scene")
+            .with_title("Feathered — Phase 3 sandbox")
             .with_surface_size(winit::dpi::LogicalSize::new(1280.0, 720.0));
-        let window = event_loop.create_window(attrs).expect("create window");
+        // Shared ownership (see AppState.window): renderer + client both
+        // hold the window alive; the surface outlives input usage.
+        let window: Arc<dyn Window> = Arc::from(event_loop.create_window(attrs).expect("create window"));
 
         // Load cache (already compiled by `feathered compile-pack`).
-        let blob = std::fs::read(&self.cache_path).unwrap_or_else(|e| {
+        let blob = std::fs::read(&self.opts.cache_path).unwrap_or_else(|e| {
             panic!(
                 "cannot read cache {}: {e} (run `feathered compile-pack` first)",
-                self.cache_path.display()
+                self.opts.cache_path.display()
             )
         });
         let (_, payload) = feathered_assets::cache::decode(&blob).expect("cache decode");
@@ -109,35 +735,21 @@ impl ApplicationHandler for App {
 
         let size = window.surface_size();
         let renderer = pollster::block_on(feathered_renderer::Renderer::new(
-            window,
+            window.clone(),
             size.width.max(1),
             size.height.max(1),
             &atlas,
             feathered_renderer::build_anim_slots(&registry, &atlas),
             feathered_renderer::RenderSettings {
-                quality: self.quality,
-                shader_pack: self.shader_pack.clone(),
+                quality: self.opts.quality,
+                shader_pack: self.opts.shader_pack.clone(),
             },
         ));
-
-        let world = build_validation_world(&registry);
-        let mesh = feathered_renderer::build_meshes(&world, &registry, &atlas);
-
-        // Deferred lighting inputs: voxel light grid + relit mesh. The
-        // staged pipeline samples per-vertex light (the Noble lightmap
-        // analog); the direct paths ignore the second mesh.
-        let light_grid = feathered_world::LightGrid::compute(&world, &registry);
-        let lighting_mesh =
-            feathered_renderer::build_lighting_meshes(&world, &registry, &atlas, &light_grid);
         let mut renderer = renderer;
-        renderer.set_world_lighting(light_grid, lighting_mesh);
 
-        // Shader-pack configuration bridge: translate the pack's own
-        // settings onto the generic effect config (see feathered-packs).
-        // Packs whose configuration cannot be read keep the quality preset —
-        // the mismatch is reported, never silently faked.
-        if let Some(pack_dir) = &self.shader_config_path {
-            match feathered_packs::translate_shader_config(pack_dir, self.quality) {
+        // Shader-pack configuration bridge (unchanged from Phase 2).
+        if let Some(pack_dir) = &self.opts.shader_config_path {
+            match feathered_packs::translate_shader_config(pack_dir, self.opts.quality) {
                 Some(translated) => {
                     if !translated.unsupported.is_empty() {
                         println!(
@@ -157,88 +769,286 @@ impl ApplicationHandler for App {
                     eprintln!(
                         "shader pack: no translatable configuration found in {}; using the {q:?} preset",
                         pack_dir.display(),
-                        q = self.quality
+                        q = self.opts.quality
                     );
                 }
             }
         }
 
+        let aspect = 1280.0 / 720.0;
+
+        // Day fraction restored from a world save (sandbox only).
+        let mut day_fraction_restore: Option<Option<f32>> = None;
+
+        // Controls: load the keymap (defaults + user overrides). A missing
+        // file is written with the defaults so users have a template.
+        let controls_path = self.opts.world_dir.join("controls.json");
+        let (controls, loaded) = controls::Controls::load(&controls_path);
+        if !loaded {
+            controls.save(&controls_path);
+        }
+
+        let (mode, mesh, camera, controller, streamer) = match self.opts.scene {
+            SceneKind::Validation => {
+                let world = build_validation_world(&registry);
+                let mesh = feathered_renderer::build_meshes(&world, &registry, &atlas);
+                let light_grid = feathered_world::LightGrid::compute(&world, &registry);
+                let lighting_mesh = feathered_renderer::build_lighting_meshes(
+                    &world,
+                    &registry,
+                    &atlas,
+                    &light_grid,
+                );
+                renderer.set_world_lighting(light_grid, lighting_mesh);
+                let camera = feathered_renderer::Camera {
+                    pos: [16.0, 14.0, 44.0],
+                    yaw: 0.0,
+                    pitch: -0.28,
+                    fov_y: 70.0_f32.to_radians(),
+                    aspect,
+                    near: 0.1,
+                    far: 400.0,
+                };
+                let controller =
+                    controller::PlayerController::new([0.5, 60.0, 0.5], self.opts.sensitivity);
+                (GameMode::Validation, mesh, camera, controller, None)
+            }
+            SceneKind::Sandbox => {
+                // The streamer owns its world, generator and atlas table; the
+                // registry is passed per call, so nothing borrows `self`.
+                let uv_table = feathered_renderer::sprite_uv_table(&registry, &atlas);
+                let mut streamer = streaming::Streamer::new(
+                    self.opts.seed,
+                    self.opts.view_distance,
+                    (atlas.width, atlas.height),
+                    // Box<dyn Fn>: wrap the Arc in a forwarding closure so
+                    // the box holds a plain callable (Box<Arc<dyn Fn>> is
+                    // not itself a Fn).
+                    Box::new(move |sprite_id: u32| uv_table(sprite_id)),
+                );
+                // World load: restore the edit journal + player/day state
+                // when a save exists; otherwise start fresh at spawn.
+                let mut loaded_day: Option<Option<f32>> = None;
+                let mut restore = None;
+                if feathered_world::save::exists(&self.opts.world_dir) {
+                    match feathered_world::save::load_from_dir(&self.opts.world_dir) {
+                        Ok(save) => {
+                            if save.meta.seed == self.opts.seed {
+                                println!(
+                                    "world: loaded {} edit(s) from {}",
+                                    save.edits.len(),
+                                    self.opts.world_dir.display()
+                                );
+                                restore = Some(save.meta.player);
+                                loaded_day = Some(save.meta.day_fraction);
+                                streamer.apply_save(&save);
+                            } else {
+                                eprintln!(
+                                    "world: save seed {} != --seed {} — starting fresh (delete {} to keep this world)",
+                                    save.meta.seed,
+                                    self.opts.seed,
+                                    self.opts.world_dir.display()
+                                );
+                            }
+                        }
+                        Err(e) => eprintln!("world: save unreadable ({e}) — starting fresh"),
+                    }
+                }
+                // Generate the spawn neighborhood and measure the surface
+                // height (RunOptions.seed feeds the deterministic terrain).
+                let spawn_h = streamer.spawn_height(&registry);
+                // Feet on the surface block + epsilon: the first physics
+                // step settles the player onto the ground.
+                let spawn: [f32; 3] = match restore {
+                    Some(p) => [p.pos[0] as f32, p.pos[1] as f32, p.pos[2] as f32],
+                    None => [0.5, spawn_h + 0.01, 0.5],
+                };
+                let (yaw, pitch) = restore
+                    .map(|p| (p.yaw, p.pitch))
+                    .unwrap_or((0.0, 0.0));
+                let controller = controller::PlayerController::new(spawn, self.opts.sensitivity);
+                let camera = feathered_renderer::Camera {
+                    pos: controller.body.eye(),
+                    yaw,
+                    pitch,
+                    fov_y: 70.0_f32.to_radians(),
+                    aspect,
+                    near: 0.1,
+                    far: 400.0,
+                };
+                if let Some(f) = loaded_day {
+                    // Applied to AppState's clock below.
+                    day_fraction_restore = Some(f);
+                }
+                (GameMode::Sandbox, Default::default(), camera, controller, Some(streamer))
+            }
+        };
+
         self.state = Some(AppState {
-            window: None, // wgpu owns the surface; redraws come from about_to_wait
+            window: Some(window),
             renderer: Some(renderer),
             registry,
-            atlas,
             mesh,
-            camera: feathered_renderer::Camera {
-                pos: [16.0, 14.0, 44.0],
-                yaw: 0.0,
-                pitch: -0.28,
-                fov_y: 70.0_f32.to_radians(),
-                aspect: 1280.0 / 720.0,
-                near: 0.1,
-                far: 400.0,
+            camera,
+            input: {
+                let mut inp = input::InputState::default();
+                inp.controls = controls;
+                inp
             },
-            keys: Default::default(),
             mouse_captured: false,
+            focused: true,
             last_tick: std::time::Instant::now(),
             tick: 0,
-        screenshot: self.screenshot.clone().map(|p| (1, p)),
-    });
+            screenshot: self.opts.screenshot.clone().map(|p| (3, p)),
+            mode,
+            controller,
+            streamer: streamer.unwrap_or_else(|| {
+                // The validation scene never touches the streamer; an empty
+                // one is harmless and keeps AppState total.
+                streaming::Streamer::new(0, 1, (16, 16), Box::new(|_| None))
+            }),
+            hotbar: inventory::Inventory::new(),
+            interact: interaction::Interaction::default(),
+            day: {
+                let mut d = daycycle::DayCycle::new(self.opts.day_length);
+                if let Some(f) = day_fraction_restore {
+                    d.set_fraction(f);
+                }
+                d
+            },
+            feedback: None,
+            mouse_held: [false, false],
+            target: None,
+            paused: false,
+            hud_visible: self.opts.hud_default,
+            debug_visible: false,
+            frame_dt_ema: 1.0 / 60.0,
+            fps_ema: 60.0,
+            particles: Vec::new(),
+            break_progress: 0.0,
+            save_timer: 0.0,
+            fov_kick: 0.0,
+            last_center: ChunkPos::new(i32::MAX, i32::MAX), // forces first re-queue
+            world_dir: self.opts.world_dir.clone().into(),
+            pack_label: self.opts.pack_label.clone(),
+            shader_label: self.opts.shader_label.clone(),
+            save_interval: self.opts.save_interval,
+        });
     }
 
     fn window_event(&mut self, event_loop: &dyn ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         let Some(state) = &mut self.state else { return };
         match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::CloseRequested => {
+                // Window closed (X button): persist the sandbox first.
+                if matches!(state.mode, GameMode::Sandbox) {
+                    state.save_world();
+                }
+                event_loop.exit();
+            }
             WindowEvent::SurfaceResized(size) => {
                 if let Some(r) = &mut state.renderer {
                     r.resize(size.width.max(1), size.height.max(1));
                 }
                 state.camera.aspect = size.width as f32 / size.height.max(1) as f32;
             }
+            WindowEvent::Focused(focused) => {
+                state.focused = focused;
+                if !focused {
+                    // Pause behavior: stop simulating, release keys/buttons
+                    // and give the cursor back so focus changes are clean.
+                    state.paused = true;
+                    state.input.clear();
+                    state.mouse_held = [false, false];
+                    if state.mouse_captured {
+                        state.mouse_captured = false;
+                        if let Some(w) = &state.window {
+                            let _ = w.set_cursor_grab(winit::window::CursorGrabMode::None);
+                            w.set_cursor_visible(true);
+                        }
+                    }
+                } else {
+                    state.paused = false;
+                }
+            }
             WindowEvent::KeyboardInput { event, .. } => {
-                if event.state == ElementState::Pressed {
-                    match event.physical_key {
-                        PhysicalKey::Code(KeyCode::Escape) => event_loop.exit(),
-                        PhysicalKey::Code(KeyCode::KeyE) => {
-                            state.mouse_captured = !state.mouse_captured;
-                            if let Some(w) = &state.window {
-                                let _ = w.set_cursor_grab(
-                                    if state.mouse_captured {
+                let pressed = event.state == ElementState::Pressed;
+                if pressed {
+                    // Actions resolved through the configurable keymap.
+                    if let PhysicalKey::Code(code) = event.physical_key {
+                        match state.input.controls.action_of(code) {
+                            Some(controls::Action::MouseCapture) => {
+                                state.mouse_captured = !state.mouse_captured;
+                                state.paused = false;
+                                if let Some(w) = &state.window {
+                                    let _ = w.set_cursor_grab(if state.mouse_captured {
                                         winit::window::CursorGrabMode::Confined
                                     } else {
                                         winit::window::CursorGrabMode::None
-                                    },
-                                );
+                                    });
+                                    w.set_cursor_visible(!state.mouse_captured);
+                                }
                             }
+                            Some(controls::Action::CycleQuality) => {
+                                if let Some(r) = &mut state.renderer {
+                                    let next = r.settings().quality.next();
+                                    r.set_quality(next);
+                                    println!("render quality: {next:?}");
+                                }
+                            }
+                            Some(controls::Action::ToggleHud) => {
+                                state.hud_visible = !state.hud_visible;
+                            }
+                            Some(controls::Action::BreakDebug) => {
+                                state.debug_visible = !state.debug_visible;
+                            }
+                            Some(controls::Action::Hotbar1) => state.hotbar.select(0),
+                            Some(controls::Action::Hotbar2) => state.hotbar.select(1),
+                            Some(controls::Action::Hotbar3) => state.hotbar.select(2),
+                            Some(controls::Action::Hotbar4) => state.hotbar.select(3),
+                            Some(controls::Action::Hotbar5) => state.hotbar.select(4),
+                            Some(controls::Action::Hotbar6) => state.hotbar.select(5),
+                            Some(controls::Action::Hotbar7) => state.hotbar.select(6),
+                            Some(controls::Action::Hotbar8) => state.hotbar.select(7),
+                            Some(controls::Action::Hotbar9) => state.hotbar.select(8),
+                            _ => {}
                         }
-                        // Cycle render quality Low → Medium → High → Ultra.
-                        PhysicalKey::Code(KeyCode::F4) => {
-                            if let Some(r) = &mut state.renderer {
-                                let next = r.settings().quality.next();
-                                r.set_quality(next);
-                                println!("render quality: {next:?}");
+                    }
+                    match event.physical_key {
+                        PhysicalKey::Code(KeyCode::Escape) => {
+                            // First Esc: release cursor + pause. Second Esc
+                            // (already paused/released): save + exit.
+                            if state.mouse_captured {
+                                state.mouse_captured = false;
+                                state.paused = true;
+                                if let Some(w) = &state.window {
+                                    let _ = w.set_cursor_grab(winit::window::CursorGrabMode::None);
+                                    w.set_cursor_visible(true);
+                                }
+                            } else if state.paused {
+                                state.save_world();
+                                event_loop.exit();
+                            } else {
+                                event_loop.exit();
                             }
                         }
                         _ => {}
                     }
                 }
                 if let PhysicalKey::Code(code) = event.physical_key {
-                    state.handle_key(code, event.state == ElementState::Pressed);
+                    state.input.set_key(code, pressed);
                 }
             }
             WindowEvent::PointerMoved { position, .. } => {
                 if state.mouse_captured {
                     if let Some(w) = &state.window {
                         let size = w.surface_size();
-                        let center = (position.x - size.width as f64 / 2.0,
-                                      position.y - size.height as f64 / 2.0);
-                        state.camera.yaw += center.0 as f32 * MOUSE_SENS;
-                        state.camera.pitch -= center.1 as f32 * MOUSE_SENS;
-                        state.camera.pitch = state
-                            .camera
-                            .pitch
-                            .clamp(-1.5, 1.5);
+                        let center = (
+                            position.x - size.width as f64 / 2.0,
+                            position.y - size.height as f64 / 2.0,
+                        );
+                        state.input.mouse_dx += center.0 as f32;
+                        state.input.mouse_dy += center.1 as f32;
                         let _ = w.set_cursor_position(winit::dpi::Position::Physical(
                             winit::dpi::PhysicalPosition::new(
                                 size.width as i32 / 2,
@@ -248,21 +1058,78 @@ impl ApplicationHandler for App {
                     }
                 }
             }
-            WindowEvent::RedrawRequested => {
-                // Rendering happens in about_to_wait; nothing to do here.
+            WindowEvent::PointerButton { state: btn_state, button, .. } => {
+                let pressed = btn_state == ElementState::Pressed;
+                if let winit::event::ButtonSource::Mouse(mb) = button {
+                    match mb {
+                        MouseButton::Left => state.mouse_held[0] = pressed,
+                        MouseButton::Right => state.mouse_held[1] = pressed,
+                        _ => {}
+                    }
+                }
             }
+            WindowEvent::MouseWheel { delta, .. } => {
+                let lines = match &delta {
+                    winit::event::MouseScrollDelta::LineDelta(_, y) => *y,
+                    winit::event::MouseScrollDelta::PixelDelta(p) => (p.y / 24.0) as f32,
+                    // #[non_exhaustive] future variants: ignore.
+                    _ => 0.0,
+                };
+                // Scroll up (positive) = next slot.
+                if lines > 0.0 {
+                    state.input.wheel_steps += 1;
+                } else if lines < 0.0 {
+                    state.input.wheel_steps -= 1;
+                }
+            }
+            WindowEvent::RedrawRequested => {}
             _ => {}
         }
     }
 
     fn about_to_wait(&mut self, event_loop: &dyn ActiveEventLoop) {
-        // Continuous redraw: Phase 1 renders every loop iteration.
         let Some(state) = &mut self.state else { return };
         let now = std::time::Instant::now();
         let dt = now.duration_since(state.last_tick).as_secs_f32();
         state.last_tick = now;
-        state.tick += (dt * 20.0) as u64;
-        state.update(dt);
+
+        // Frame-time clamp: after alt-tab or a stall, simulate at most
+        // MAX_FRAME_DT (the controller subdivides; this protects the
+        // streaming budget too).
+        let dt = dt.min(controller::MAX_FRAME_DT);
+
+        // FPS/frame-time EMA for the debug screen.
+        if dt > 0.0 {
+            state.frame_dt_ema = state.frame_dt_ema * 0.9 + dt * 0.1;
+            state.fps_ema = state.fps_ema * 0.9 + (1.0 / dt) * 0.1;
+        }
+
+        // Paused (unfocused or Esc) → no simulation, but still present.
+        if state.focused && !state.paused {
+            match &state.mode {
+                GameMode::Validation => state.validation_update(dt),
+                GameMode::Sandbox => state.sandbox_update(dt),
+            }
+        }
+
+        // HUD + world overlays (screen-space authoring is cheap; skip when
+        // the HUD is fully hidden).
+        if state.hud_visible || state.debug_visible {
+            let hud = state.build_hud();
+            if let Some(r) = &mut state.renderer {
+                r.set_overlay(hud);
+            }
+        }
+
+        // Feedback line in the title (duplicates the in-HUD line for
+        // window-switchers).
+        if let Some((t, msg)) = &state.feedback {
+            if t.elapsed().as_secs_f32() < 3.0 {
+                if let Some(w) = &state.window {
+                    w.set_title(&format!("Feathered — sandbox — {msg}"));
+                }
+            }
+        }
 
         // One-shot screenshot: capture after 3 warmup frames, then exit.
         if let Some((remaining, path)) = &mut state.screenshot {
@@ -273,8 +1140,6 @@ impl ApplicationHandler for App {
                 match r.capture_last_frame() {
                     Ok(rgba) => {
                         let (w, h) = r.frame_size();
-                        // Offscreen capture target is Rgba8Unorm: rows map
-                        // straight into the RGBA PNG.
                         let img = image::RgbaImage::from_fn(w, h, |x, y| {
                             let i = (y * w + x) as usize * 4;
                             image::Rgba([rgba[i], rgba[i + 1], rgba[i + 2], 255])
@@ -287,24 +1152,31 @@ impl ApplicationHandler for App {
                     }
                     Err(e) => eprintln!("screenshot capture failed: {e}"),
                 }
+                // The screenshot path bypasses CloseRequested/Esc: persist
+                // the sandbox here too so capture runs leave a valid world.
+                if matches!(state.mode, GameMode::Sandbox) {
+                    state.save_world();
+                }
                 event_loop.exit();
             }
         }
 
         if state.screenshot.is_none() {
             if let Some(r) = &mut state.renderer {
-                let _ = r.render(&state.mesh, &state.camera, state.tick);
+                r.render(&state.mesh, &state.camera, state.tick);
             }
         }
     }
+
+    // NOTE: this winit beta exposes no `exiting` hook — save-on-exit happens
+    // explicitly at each exit point (Esc quit below, CloseRequested above).
 }
 
-/// The ten-block validation scene (Phase 1 world).
+/// The ten-block validation scene (Phase 1 world — preserved verbatim).
 fn build_validation_world(registry: &Registry) -> World {
     let id = |name: &str| registry.block_id(name).unwrap_or_else(|| panic!("block {name} missing"));
     let mut world = World::new([32, 16, 32]);
 
-    // Stone ground.
     let stone = id("stone");
     for x in 0..32 {
         for z in 0..32 {
@@ -312,41 +1184,34 @@ fn build_validation_world(registry: &Registry) -> World {
         }
     }
 
-    // Oak logs: all three axes.
     let log = id("oak_log");
-    world.set(4, 1, 4, log, 0); // axis=y
-    world.set(6, 1, 4, log, 1); // axis=x (schema order: x,y,z -> state 1)
-    world.set(8, 1, 4, log, 2); // axis=z
+    world.set(4, 1, 4, log, 0);
+    world.set(6, 1, 4, log, 1);
+    world.set(8, 1, 4, log, 2);
 
-    // Grass blocks (normal + snowy via variant ordering).
     let grass = id("grass_block");
     world.set(4, 1, 8, grass, 0);
     world.set(6, 1, 8, grass, 1);
 
-    // Glass pane wall (translucent check).
     let glass = id("glass");
     for y in 1..4 {
         world.set(12, y, 4, glass, 0);
         world.set(13, y, 4, glass, 0);
     }
 
-    // Torch.
     let torch = id("torch");
     world.set(4, 1, 12, torch, 0);
 
-    // Rail.
     let rail = id("rail");
     for x in 6..10 {
         world.set(x, 1, 12, rail, 0);
     }
 
-    // Short grass (cross).
     let short_grass = id("short_grass");
     world.set(12, 1, 8, short_grass, 0);
     world.set(13, 1, 9, short_grass, 0);
     world.set(14, 1, 8, short_grass, 0);
 
-    // Vine on a stone pillar (multipart).
     let vine = id("vine");
     for y in 1..4 {
         world.set(16, y, 8, stone, 0);
@@ -354,13 +1219,11 @@ fn build_validation_world(registry: &Registry) -> World {
     world.set(17, 2, 8, vine, 0);
     world.set(17, 3, 8, vine, 0);
 
-    // Redstone wire (multipart, property states).
     let wire = id("redstone_wire");
     for x in 12..18 {
         world.set(x, 1, 14, wire, 0);
     }
 
-    // Water pool (animated).
     let water = id("water");
     for x in 20..26 {
         for z in 4..10 {
@@ -369,19 +1232,4 @@ fn build_validation_world(registry: &Registry) -> World {
     }
 
     world
-}
-
-/// Launch the validation scene.
-pub fn run(opts: RunOptions) -> Result<(), Box<dyn std::error::Error>> {
-    let event_loop = EventLoop::new()?;
-    let app = App {
-        state: None,
-        cache_path: opts.cache_path,
-        screenshot: opts.screenshot,
-        quality: opts.quality,
-        shader_pack: opts.shader_pack,
-        shader_config_path: opts.shader_config_path,
-    };
-    event_loop.run_app(app)?;
-    Ok(())
 }

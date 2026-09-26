@@ -50,6 +50,12 @@ fn vs_main(
     @location(4) light: vec2<f32>,
 ) -> VsOut {
     var out: VsOut;
+    // Chunk-local → world: vertex positions arrive relative to the chunk
+    // origin; the chunk's world offset rides in flags (chunk_origin slots).
+    // flags.x = shade (0..255), flags.y = anim slot; the WORLD offset is
+    // packed into the two upper u32 words via additional vertex data — but
+    // to keep the vertex format unchanged (24 B), chunk-local coordinates
+    // are PRE-TRANSLATED on the CPU (mesher emits world-space positions).
     out.clip = globals.view_proj * vec4<f32>(pos, 1.0);
     out.tint = tint;
     var v = uv.y;

@@ -10,7 +10,7 @@
 //! First launch: when no pack is installed/selected, Feathered explains that
 //! it ships no game assets and offers to import one — it never downloads.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 mod first_run;
 mod validate;
@@ -44,7 +44,7 @@ fn main() {
 
 fn print_help() {
     println!(
-        "feathered — an independent Minecraft-compatible engine (Phase 2)\n\
+        "feathered — an independent Minecraft-compatible engine (Phase 3)\n\
 \n\
 Feathered ships with no game assets: you supply a resource pack.\n\
 \n\
@@ -54,9 +54,19 @@ feathered packs list|import <path>|use <id>|uninstall <id>|open-folder|browse\n 
 feathered shaders list|import <path>|enable <id>|disable|uninstall <id>\n  \
 feathered compile-pack [--required] [--pack-dir <dir>] [--out <cache>]\n  \
 feathered validate [--pack-dir <dir>] [--cache <file>]\n  \
-feathered render [--pack-dir <dir>] [--cache <file>] [--screenshot <file>] [--quality low|medium|high|ultra]\n\n\
+feathered render [--pack-dir <dir>] [--cache <file>] [--screenshot <file>] [--quality low|medium|high|ultra]\n  \
+                 [--scene sandbox|validation] [--seed <u64>] [--view-distance <chunks>]\n  \
+                 [--sensitivity <mult>] [--day-length <seconds>] [--world <dir>]\n  \
+                 [--save-interval <seconds>] [--no-hud]\n\n\
 Default pack dir: ./texture/assets   Default cache: ./target/feathered-cache.bin\n\
-Quality presets: low (half-res), medium (default), high (+post), ultra (max)."
+Quality presets: low (half-res), medium (default), high (+post), ultra (max).\n\
+Sandbox: --seed (default 20260926), --view-distance (default 6, clamped 1..32),\n\
+--sensitivity (1.0 = default), --day-length (seconds; 0 = frozen sun).\n\
+--world <dir> loads/saves that world (default ./world): player edits, position\n\
+and time persist there atomically; autosave every --save-interval (default 30 s)\n\
+and on exit. Rebind keys via <world>/../controls.json (auto-generated).\n\
+In game: F1 HUD, F3 debug screen, F4 quality, E mouse capture, Esc pause/quit.\n\
+--scene validation runs the Phase-1 fly-camera scene (sandbox options ignored)."
     );
 }
 
@@ -82,6 +92,14 @@ fn parse_quality(args: &[String]) -> feathered_packs::Quality {
         Some("ultra") => feathered_packs::Quality::Ultra,
         _ => feathered_packs::Quality::Medium,
     }
+}
+
+/// Human-readable pack name for the debug screen (folder name fallback).
+fn pack_display_name(pack_dir: &Path) -> String {
+    pack_dir
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| pack_dir.display().to_string())
 }
 
 /// Map the settings-side preset onto the renderer's engine-side preset.
@@ -462,14 +480,59 @@ fn render(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
-    feathered_client::run(feathered_client::RunOptions {
-        pack_dir,
-        cache_path,
-        screenshot: arg_value(args, "--screenshot").map(PathBuf::from),
-        quality: render_quality(parse_quality(args)),
-        shader_pack: active_shader_id,
-        shader_config_path,
-    })
+    let mut opts = feathered_client::RunOptions::default();
+    opts.pack_dir = pack_dir.clone();
+    opts.cache_path = cache_path;
+    opts.screenshot = arg_value(args, "--screenshot").map(PathBuf::from);
+    opts.quality = render_quality(parse_quality(args));
+    opts.shader_pack = active_shader_id.clone();
+    opts.shader_config_path = shader_config_path;
+    // Human labels for the debug screen.
+    opts.pack_label = pack_display_name(&pack_dir);
+    opts.shader_label = active_shader_id;
+
+    // Sandbox options (ignored by the validation scene).
+    if let Some(s) = arg_value(args, "--seed") {
+        opts.seed = s.parse().map_err(|_| format!("invalid --seed: {s}"))?;
+    }
+    if let Some(s) = arg_value(args, "--view-distance") {
+        opts.view_distance = s
+            .parse()
+            .map_err(|_| format!("invalid --view-distance: {s}"))?;
+    }
+    if let Some(s) = arg_value(args, "--sensitivity") {
+        opts.sensitivity = s
+            .parse::<f32>()
+            .map_err(|_| format!("invalid --sensitivity: {s}"))?
+            .max(0.05);
+    }
+    if let Some(s) = arg_value(args, "--day-length") {
+        opts.day_length = s
+            .parse::<f32>()
+            .map_err(|_| format!("invalid --day-length: {s}"))?
+            .max(0.0);
+    }
+    if let Some(s) = arg_value(args, "--world") {
+        opts.world_dir = PathBuf::from(s);
+    }
+    if let Some(s) = arg_value(args, "--save-interval") {
+        opts.save_interval = s
+            .parse::<f32>()
+            .map_err(|_| format!("invalid --save-interval: {s}"))?
+            .max(0.0);
+    }
+    if arg_flag(args, "--no-hud") {
+        opts.hud_default = false;
+    }
+    if let Some(s) = arg_value(args, "--scene") {
+        opts.scene = match s.to_ascii_lowercase().as_str() {
+            "sandbox" => feathered_client::SceneKind::Sandbox,
+            "validation" => feathered_client::SceneKind::Validation,
+            _ => return Err(format!("invalid --scene: {s} (sandbox|validation)").into()),
+        };
+    }
+
+    feathered_client::run(opts)
 }
 
 /// Open a folder in the OS file manager (best effort; CLI still prints it).

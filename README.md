@@ -25,6 +25,12 @@ The code is a seven-crate Cargo workspace with a strict dependency direction
 | `feathered-packs` | `packs/` | Resource-pack & shader-pack managers, settings, quality presets |
 | `feathered-assets` | `assets/` | Pack discovery + asset compiler + atlas + cache |
 
+> The sandbox persists worlds to `./world` (override with `--world <dir>`):
+> a versioned, atomically-written save holds the seed, player state, time
+> and every player-placed/broken block. Unmodified terrain is never stored —
+> it regenerates deterministically from the seed. Rebind keys via the
+> generated `controls.json`.
+
 The asset compiler resolves the pack's full chain — blockstate → model →
 parent chain → texture → baked rotations → texture atlas — and serializes
 the result into a binary `FEAT` cache with a content digest, so the client
@@ -98,9 +104,12 @@ run the staged deferred pipeline (per-effect toggles documented in
 
 The workspace carries golden tests that encode ground truth from the
 resource pack (blockstate resolution, model parent chains, rotation baking,
-atlas packing), mesher tests (culling, variant selection, layering), and
+atlas packing), mesher tests (culling, variant selection, layering),
 pack-manager tests (zip/folder import, version detection, invalid packs,
-switching, cache generation, shader discovery, zip-slip protection):
+switching, cache generation, shader discovery, zip-slip protection),
+world-save round-trip tests (versioned format, atomic writes, corruption
+rejection, edit persistence across unload/reload), and a CPU end-to-end
+scenario (spawn → modify → save → reload → verify → continue streaming):
 
 ```sh
 cargo test --workspace

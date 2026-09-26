@@ -7,6 +7,10 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+rayon.workspace = true
+bytemuck.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 feathered-renderer.workspace = true
 feathered-chunk.workspace = true
 feathered-world.workspace = true

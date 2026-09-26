@@ -16,6 +16,20 @@ use feathered_assets::compiled::CompiledAppearance;
 use feathered_world::grid::World;
 use feathered_world::{resolve_appearance, AppearanceRef, Registry};
 
+/// Block/block-state reader over any voxel source. Implemented for the
+/// Phase-1 flat `World` and for the streaming `Region` (below); the mesher
+/// only needs this one query, so chunked and flat meshing share every other
+/// code path.
+pub trait BlockSource {
+    fn block_at(&self, x: i64, y: i64, z: i64) -> Option<(u32, u32)>;
+}
+
+impl BlockSource for World {
+    fn block_at(&self, x: i64, y: i64, z: i64) -> Option<(u32, u32)> {
+        World::get(self, x, y, z)
+    }
+}
+
 /// Vertex: 3×f32 pos + 2×u16 uv + u32 tint + shade + anim_id + 2×u8 light
 /// = 24 B. Positions are f32 because rotated elements (45° crosses, 22.5°
 /// stairs landings) land off the 1/16 grid; i16 quantization visibly shears
@@ -196,7 +210,7 @@ fn emit_fluid(
     rects: &[Option<SpriteRect>],
     atlas_size: (u32, u32),
     registry: &Registry,
-    world: &World,
+    source: &dyn BlockSource,
     x: i64,
     y: i64,
     z: i64,
@@ -205,7 +219,7 @@ fn emit_fluid(
     let anim_id = registry.anim_slot(sprite).unwrap_or(0);
     let h = 14.0f32; // source-block surface height, 0..16 units
 
-    let at = |dx: i64, dy: i64, dz: i64| world.get(x + dx, y + dy, z + dz);
+    let at = |dx: i64, dy: i64, dz: i64| source.block_at(x + dx, y + dy, z + dz);
     let is_water = |dx: i64, dy: i64, dz: i64| {
         at(dx, dy, dz)
             .map(|(nid, _)| {
@@ -262,6 +276,17 @@ fn emit_fluid(
     }
 }
 
+/// A streaming region: a view over a chunk container for meshing one chunk
+/// with its border neighbors loaded (so cross-chunk face culling is exact).
+/// `world` is the chunk container being meshed around; `center` is the chunk
+/// whose blocks are emitted; blocks outside the loaded set read as `None`
+/// (the mesher treats that as occluding, hiding border shell faces).
+impl BlockSource for feathered_world::chunks::RegionView<'_> {
+    fn block_at(&self, x: i64, y: i64, z: i64) -> Option<(u32, u32)> {
+        self.get(x, y, z)
+    }
+}
+
 /// Mesh one world. `registry` supplies state→appearance and occlusion data;
 /// `uv_rects` maps SpriteId → (x, y, frame_w, frame_h, frames, stride,
 /// fully-opaque-sprite).
@@ -272,14 +297,33 @@ pub fn mesh_world(
     atlas_size: (u32, u32),
     tint: &TintPolicy,
 ) -> MeshedChunk {
-    let mut out = MeshedChunk::default();
     let [sx, sy, sz] = world.size;
+    let bounds = (
+        [0i64, 0, 0],
+        [sx as i64, sy as i64, sz as i64],
+    );
+    mesh_region(world, registry, uv_rects, atlas_size, tint, bounds)
+}
+
+/// Mesh a rectangular block region `[min, max)` of any `BlockSource`.
+/// `mesh_world` is the special case over the whole flat world; the client
+/// meshes one chunk at a time with a `RegionView` whose bounds are that
+/// chunk's 16×H×16 volume (the source itself spans the padded neighborhood).
+pub fn mesh_region(
+    source: &dyn BlockSource,
+    registry: &Registry,
+    uv_rects: &dyn Fn(u32) -> Option<SpriteRect>,
+    atlas_size: (u32, u32),
+    tint: &TintPolicy,
+    (min, max): ([i64; 3], [i64; 3]),
+) -> MeshedChunk {
+    let mut out = MeshedChunk::default();
     let rects = sprite_tables(registry, uv_rects);
 
-    for y in 0..sy as i64 {
-        for z in 0..sz as i64 {
-            for x in 0..sx as i64 {
-                let Some((block_id, state_id)) = world.get(x, y, z) else { continue };
+    for y in min[1]..max[1] {
+        for z in min[2]..max[2] {
+            for x in min[0]..max[0] {
+                let Some((block_id, state_id)) = source.block_at(x, y, z) else { continue };
                 if block_id == 0 {
                     continue;
                 }
@@ -300,12 +344,12 @@ pub fn mesh_world(
                     let Some(model) = registry.model(mi.model) else { continue };
                     for q in &model.quads {
                         // Neighbor culling: only faces with a cull dir are
-                        // hidden when the neighbor occludes. Out-of-world
+                        // hidden when the neighbor occludes. Out-of-region
                         // borders count as occluding so the world shell is
                         // never meshed.
                         if let Some(cull) = q.cull {
                             let (dx, dy, dz) = cull_offset(cull);
-                            let neighbor = world.get(x + dx, y + dy, z + dz);
+                            let neighbor = source.block_at(x + dx, y + dy, z + dz);
                             let neighbor_occludes = match neighbor {
                                 Some((0, _)) => false, // air
                                 Some((nid, nsid)) => {
@@ -339,7 +383,7 @@ pub fn mesh_world(
                             if std::env::var("FEATHERED_DEBUG_FLUID").is_ok() {
                                 eprintln!("[fluid] water at {x},{y},{z} sprite {sid:?}");
                             }
-                            emit_fluid(&mut out, &rects, atlas_size, registry, world, x, y, z, sid);
+                            emit_fluid(&mut out, &rects, atlas_size, registry, source, x, y, z, sid);
                         }
                         None => {
                             if std::env::var("FEATHERED_DEBUG_FLUID").is_ok() {

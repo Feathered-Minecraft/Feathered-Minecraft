@@ -32,7 +32,7 @@ rayon = "1"
 bytemuck = { version = "1", features = ["derive"] }
 sha2 = "0.10"
 wgpu = "30"
-winit = "=0.31.0-beta.3"
+winit = { version = "=0.31.0-beta.3", features = ["serde"] }
 pollster = "0.4"
 
 [profile.release]

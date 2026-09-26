@@ -141,6 +141,9 @@ name = "bitflags"
 version = "2.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ded4057c258ba199e2d26386d3af3780957ecaee6c4ef4041c6b4b8b97c0b06"
+dependencies = [
+ "serde_core",
+]
 
 [[package]]
 name = "block-buffer"
@@ -351,6 +354,9 @@ name = "cursor-icon"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "derive_arbitrary"
@@ -444,6 +450,9 @@ name = "dpi"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8b14ccef22fc6f5a8f4d7d768562a182c04ce9a3b3157b91390b52ddfdf1a76"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "either"
@@ -522,6 +531,7 @@ dependencies = [
 name = "feathered-client"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "feathered-assets",
  "feathered-chunk",
  "feathered-packs",
@@ -529,6 +539,9 @@ dependencies = [
  "feathered-world",
  "image",
  "pollster",
+ "rayon",
+ "serde",
+ "serde_json",
  "winit",
 ]
 
@@ -564,6 +577,9 @@ name = "feathered-world"
 version = "0.1.0"
 dependencies = [
  "feathered-assets",
+ "rayon",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -2638,6 +2654,7 @@ dependencies = [
  "libc",
  "raw-window-handle",
  "rustix",
+ "serde",
  "smol_str",
  "tracing",
  "winit-android",
@@ -2721,6 +2738,7 @@ dependencies = [
  "dpi",
  "keyboard-types",
  "raw-window-handle",
+ "serde",
  "smol_str",
  "url",
  "web-time",
@@ -2758,6 +2776,7 @@ dependencies = [
  "objc2-foundation",
  "objc2-ui-kit",
  "raw-window-handle",
+ "serde",
  "smol_str",
  "tracing",
  "winit-common",

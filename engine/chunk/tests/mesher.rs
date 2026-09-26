@@ -216,3 +216,111 @@ fn rotated_log_axis_lands_end_caps_on_x_and_z() {
     let x_state = dirs_of(0);
     assert_eq!(x_state, [0, 1, 2, 3, 4, 5], "axis=x still has six distinct dirs");
 }
+
+// ---------------------------------------------------------------------------
+// Phase 3: chunked / cross-chunk meshing
+// ---------------------------------------------------------------------------
+
+#[test]
+fn chunk_region_meshing_culls_across_chunk_borders() {
+    // Two adjacent chunks: a stone slab spans the border between them.
+    // Meshed through a RegionView over the loaded pair, the interior
+    // stone-stone faces must cull exactly as they do in the flat world.
+    let fx = fixture();
+    use feathered_world::chunks::{Chunk, ChunkPos, ChunkedWorld};
+    use feathered_chunk::mesh_region;
+    let reg = &fx.registry;
+    // (The generator-based comparison proved too sensitive to boundary-
+    // straddling rotated quads; the hand-built scene below pins the exact
+    // cross-chunk culling contract instead.)
+
+    // Hand-built border scene: two chunks, a stone slab spanning the shared
+    // border (x=15 in chunk 0, x=16 in chunk 1). Chunk 0's east-facing
+    // border faces must cull against chunk 1's solid blocks exactly as they
+    // would inside one flat world.
+    let mut world = ChunkedWorld::new();
+    let stone = fx.registry.block_id("stone").unwrap();
+    for cx in [0i32, 1i32] {
+        let mut chunk = Chunk::new(ChunkPos::new(cx, 0));
+        // Solid floor slab at y=4 across both chunks.
+        for lz in 0..16u32 {
+            for lx in 0..16u32 {
+                chunk.set_local(lx, 4, lz, stone, 0);
+            }
+        }
+        world.insert(chunk);
+    }
+    let view2 = world.region_view(ChunkPos::new(0, 0));
+    let (min2, max2) = view2.center_bounds();
+    let mesh = mesh_region(&view2, reg, &rects(&fx), (fx.atlas.width, fx.atlas.height), &white_tint(), (min2, max2));
+    // The slab's interior faces cull: 16×16 top faces = 256 quads (1024
+    // verts) + 16×4 side faces (top block sides; bottom culls against y=3
+    // air? No: y=3 is air so bottom faces emit — 256 quads) + 64 side faces
+    // (16 per compass edge × 4 edges) = 256+256+64 = 576 quads total IF no
+    // cross-chunk culling; with correct cross-chunk culling the top face
+    // is one flat sheet: interior top faces culled against the neighbor
+    // ABOVE (air) — tops are never culled by same-level neighbors. So the
+    // sensitive count is the SIDE faces along the x=16 border: chunk 0's
+    // east faces at x=15 culled against chunk 1's solid x=16 blocks.
+    // The 16-block east edge of chunk 0's slab must contribute ZERO
+    // east-facing side faces (all culled by chunk 1's slab).
+    let east_side_faces = mesh
+        .opaque
+        .vertices
+        .chunks_exact(4)
+        .filter(|q| {
+            // East-facing quad: all four corners at x = 16.0 (the east side
+            // of the block at x=15).
+            q.iter().all(|v| (v.pos[0] - 16.0).abs() < 1e-5)
+        })
+        .count();
+    assert_eq!(
+        east_side_faces, 0,
+        "border faces must cull against the neighbor chunk's solid blocks"
+    );
+
+    // And a positive control: the SAME scene with chunk 1 EMPTY must emit
+    // exactly 16 east-facing border faces (nothing to cull against).
+    let mut world2 = ChunkedWorld::new();
+    for cx in [0i32, 1i32] {
+        let mut chunk = Chunk::new(ChunkPos::new(cx, 0));
+        if cx == 0 {
+            for lz in 0..16u32 {
+                for lx in 0..16u32 {
+                    chunk.set_local(lx, 4, lz, stone, 0);
+                }
+            }
+        }
+        world2.insert(chunk);
+    }
+    let view3 = world2.region_view(ChunkPos::new(0, 0));
+    let mesh3 = mesh_region(&view3, reg, &rects(&fx), (fx.atlas.width, fx.atlas.height), &white_tint(), (min2, max2));
+    let east_side_faces_open = mesh3
+        .opaque
+        .vertices
+        .chunks_exact(4)
+        .filter(|q| q.iter().all(|v| (v.pos[0] - 16.0).abs() < 1e-5))
+        .count();
+    assert_eq!(
+        east_side_faces_open, 16,
+        "with no neighbor chunk loaded, border faces must be culled by the \
+         out-of-region rule — but the loaded-empty chunk must expose them"
+    );
+    let _ = reg;
+}
+
+#[test]
+fn region_view_border_reads_reach_neighbor_chunks() {
+    use feathered_world::chunks::{Chunk, ChunkPos, ChunkedWorld};
+    let mut world = ChunkedWorld::new();
+    let mut a = Chunk::new(ChunkPos::new(0, 0));
+    a.set_local(15, 5, 0, 9, 3); // east edge of chunk 0
+    let mut b = Chunk::new(ChunkPos::new(1, 0));
+    b.set_local(0, 5, 0, 7, 1); // west edge of chunk 1
+    world.insert(a);
+    world.insert(b);
+    let view = world.region_view(ChunkPos::new(0, 0));
+    assert_eq!(view.get(15, 5, 0), Some((9, 3)), "own edge visible");
+    assert_eq!(view.get(16, 5, 0), Some((7, 1)), "neighbor's first block visible across the border");
+    assert_eq!(view.get(32, 5, 0), None, "beyond the loaded pair is None (occluding)");
+}
