@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "assets",
+    "packs",
     "engine/world",
     "engine/chunk",
     "engine/renderer",
@@ -18,6 +19,7 @@ repository = "https://github.com/Feathered-Minecraft/Feathered-Minecraft"
 
 [workspace.dependencies]
 feathered-assets = { path = "assets" }
+feathered-packs = { path = "packs" }
 feathered-world = { path = "engine/world" }
 feathered-chunk = { path = "engine/chunk" }
 feathered-renderer = { path = "engine/renderer" }

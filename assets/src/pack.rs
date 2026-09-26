@@ -77,22 +77,7 @@ pub fn discover(base: &Path) -> AssetResult<PackIndex> {
 
     let mut index = PackIndex { packs, ..Default::default() };
     for pack in &index.packs.clone() {
-        for ns_entry in std::fs::read_dir(&pack.root)
-            .map_err(|e| AssetError {
-                path: pack.root.display().to_string(),
-                message: format!("cannot read pack root: {e}"),
-            })?
-            .flatten()
-        {
-            let ns_path = ns_entry.path();
-            if !ns_path.is_dir() {
-                continue;
-            }
-            let namespace = ns_path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or_default()
-                .to_string();
+        for (ns_path, namespace) in namespace_dirs(&pack.root) {
             for entry in walk(&ns_path) {
                 let rel = entry
                     .strip_prefix(&ns_path)
@@ -129,6 +114,47 @@ pub fn discover(base: &Path) -> AssetResult<PackIndex> {
         }
     }
     Ok(index)
+}
+
+/// Enumerate the namespace directories of a pack root. Two layouts are
+/// supported:
+/// * Feathered-local (`<root>/<namespace>/…`) — every child directory is a
+///   namespace (e.g. `texture/assets/minecraft/`).
+/// * Standard vanilla/resource-pack layout (`<root>/assets/<namespace>/…`) —
+///   used by packs imported from ZIPs or the user's game install.
+fn namespace_dirs(root: &Path) -> Vec<(PathBuf, String)> {
+    let mut out = Vec::new();
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return out;
+    };
+    for entry in entries.flatten() {
+        let p = entry.path();
+        if !p.is_dir() {
+            continue;
+        }
+        let name = entry
+            .file_name()
+            .to_string_lossy()
+            .into_owned();
+        if name == "assets" {
+            // Standard layout: namespaces live one level deeper.
+            if let Ok(ns_entries) = std::fs::read_dir(&p) {
+                for ns in ns_entries.flatten() {
+                    if ns.path().is_dir() {
+                        let ns_name = ns
+                            .file_name()
+                            .to_string_lossy()
+                            .into_owned();
+                        out.push((ns.path(), ns_name));
+                    }
+                }
+            }
+        } else {
+            // Local layout: the child directory itself is a namespace.
+            out.push((p, name));
+        }
+    }
+    out
 }
 
 fn walk(dir: &Path) -> Vec<PathBuf> {

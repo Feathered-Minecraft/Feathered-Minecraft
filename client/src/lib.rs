@@ -16,6 +16,16 @@ pub struct RunOptions {
     pub cache_path: PathBuf,
     /// When set, capture one frame to this PNG and exit (headless validation).
     pub screenshot: Option<PathBuf>,
+    /// Render quality preset (Low/Medium/High/Ultra).
+    pub quality: feathered_renderer::RenderQuality,
+    /// Enabled shader pack id, if any (from feathered-packs). Informational:
+    /// the renderer keeps its pipeline modular across shader packs.
+    pub shader_pack: Option<String>,
+    /// Directory of the active shader *pack*, when one is enabled. The client
+    /// translates its configuration (feathered-packs bridge) into the
+    /// renderer's generic `ShaderEffectConfig` — the renderer never sees pack
+    /// files or pack-specific data.
+    pub shader_config_path: Option<PathBuf>,
 }
 
 const MOVE_SPEED: f32 = 8.0;
@@ -71,6 +81,9 @@ struct App {
     state: Option<AppState>,
     cache_path: PathBuf,
     screenshot: Option<PathBuf>,
+    quality: feathered_renderer::RenderQuality,
+    shader_pack: Option<String>,
+    shader_config_path: Option<PathBuf>,
 }
 
 impl ApplicationHandler for App {
@@ -101,18 +114,54 @@ impl ApplicationHandler for App {
             size.height.max(1),
             &atlas,
             feathered_renderer::build_anim_slots(&registry, &atlas),
+            feathered_renderer::RenderSettings {
+                quality: self.quality,
+                shader_pack: self.shader_pack.clone(),
+            },
         ));
 
         let world = build_validation_world(&registry);
         let mesh = feathered_renderer::build_meshes(&world, &registry, &atlas);
-        eprintln!(
-            "[dbg] mesh counts: opaque {}v/{}i, cutout {}v/{}i, translucent {}v/{}i",
-            mesh.opaque.vertices.len(), mesh.opaque.indices.len(),
-            mesh.cutout.vertices.len(), mesh.cutout.indices.len(),
-            mesh.translucent.vertices.len(), mesh.translucent.indices.len()
-        );
-        let vp = feathered_renderer::Camera { pos: [16.0, 10.0, 30.0], yaw: 0.0, pitch: -0.3, fov_y: 70.0_f32.to_radians(), aspect: 1280.0/720.0, near: 0.1, far: 400.0 }.view_proj();
-        eprintln!("[dbg] view_proj row0={:?} row3={:?}", vp[0], vp[3]);
+
+        // Deferred lighting inputs: voxel light grid + relit mesh. The
+        // staged pipeline samples per-vertex light (the Noble lightmap
+        // analog); the direct paths ignore the second mesh.
+        let light_grid = feathered_world::LightGrid::compute(&world, &registry);
+        let lighting_mesh =
+            feathered_renderer::build_lighting_meshes(&world, &registry, &atlas, &light_grid);
+        let mut renderer = renderer;
+        renderer.set_world_lighting(light_grid, lighting_mesh);
+
+        // Shader-pack configuration bridge: translate the pack's own
+        // settings onto the generic effect config (see feathered-packs).
+        // Packs whose configuration cannot be read keep the quality preset —
+        // the mismatch is reported, never silently faked.
+        if let Some(pack_dir) = &self.shader_config_path {
+            match feathered_packs::translate_shader_config(pack_dir, self.quality) {
+                Some(translated) => {
+                    if !translated.unsupported.is_empty() {
+                        println!(
+                            "shader pack: {} option(s) recognized but not supported: {}",
+                            translated.unsupported.len(),
+                            translated
+                                .unsupported
+                                .iter()
+                                .map(|(k, _)| *k)
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        );
+                    }
+                    renderer.apply_shader_config(translated.config);
+                }
+                None => {
+                    eprintln!(
+                        "shader pack: no translatable configuration found in {}; using the {q:?} preset",
+                        pack_dir.display(),
+                        q = self.quality
+                    );
+                }
+            }
+        }
 
         self.state = Some(AppState {
             window: None, // wgpu owns the surface; redraws come from about_to_wait
@@ -133,8 +182,8 @@ impl ApplicationHandler for App {
             mouse_captured: false,
             last_tick: std::time::Instant::now(),
             tick: 0,
-            screenshot: self.screenshot.clone().map(|p| (1, p)),
-        });
+        screenshot: self.screenshot.clone().map(|p| (1, p)),
+    });
     }
 
     fn window_event(&mut self, event_loop: &dyn ActiveEventLoop, _id: WindowId, event: WindowEvent) {
@@ -161,6 +210,14 @@ impl ApplicationHandler for App {
                                         winit::window::CursorGrabMode::None
                                     },
                                 );
+                            }
+                        }
+                        // Cycle render quality Low → Medium → High → Ultra.
+                        PhysicalKey::Code(KeyCode::F4) => {
+                            if let Some(r) = &mut state.renderer {
+                                let next = r.settings().quality.next();
+                                r.set_quality(next);
+                                println!("render quality: {next:?}");
                             }
                         }
                         _ => {}
@@ -321,6 +378,9 @@ pub fn run(opts: RunOptions) -> Result<(), Box<dyn std::error::Error>> {
         state: None,
         cache_path: opts.cache_path,
         screenshot: opts.screenshot,
+        quality: opts.quality,
+        shader_pack: opts.shader_pack,
+        shader_config_path: opts.shader_config_path,
     };
     event_loop.run_app(app)?;
     Ok(())

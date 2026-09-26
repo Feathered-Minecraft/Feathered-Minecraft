@@ -4,6 +4,9 @@
 //! parsing itself. The renderer and mesher talk to this crate only.
 
 pub mod grid;
+pub mod light;
+
+pub use light::LightGrid;
 
 use feathered_assets::blockstates::{ModelInstance, Occlusion, Predicate};
 use feathered_assets::compiled::{CompiledAppearance, CompiledPack};
@@ -121,6 +124,9 @@ impl Registry {
             .iter()
             .map(|a| (a.sprite.0, a.frametime, a.frames.clone(), a.strip_frames, a.interpolate))
             .collect();
+        // `CompiledPack` must expose `vanilla_face_shade` for the test helper
+        // below; nothing else from the pack is retained beyond what from_compiled
+        // already owned.
         Registry {
             blocks,
             by_name,
@@ -204,6 +210,44 @@ impl Registry {
 
     pub fn face_shade(&self) -> &[f32; 6] {
         &self.face_shade
+    }
+
+    /// Minimal registry for engine tests (feathered-world has no dev-deps):
+    /// names in the transparent list get `Occlusion::None`, everything else
+    /// a single full-cube occluder state. No models/sprites are populated —
+    /// this registry is only good for light/occlusion queries.
+    #[doc(hidden)]
+    pub fn from_names_for_tests(names: &[&str]) -> Registry {
+        const TRANSPARENT: &[&str] = &[
+            "glass", "leaves", "water", "torch", "rail", "vine", "short_grass", "scaffolding",
+        ];
+        let mut blocks = Vec::new();
+        let mut by_name = std::collections::HashMap::new();
+        for (i, n) in names.iter().enumerate() {
+            by_name.insert((*n).to_string(), (i + 1) as u32);
+            let occl = if TRANSPARENT.contains(n) {
+                Occlusion::None
+            } else {
+                Occlusion::Full
+            };
+            blocks.push(BlockDef {
+                name: (*n).to_string(),
+                schema: vec![],
+                states: vec![StateEntry {
+                    appearance: CompiledAppearance::Static(vec![]),
+                    occlusion: occl,
+                    same_block_cull: false,
+                }],
+            });
+        }
+        Registry {
+            blocks,
+            by_name,
+            sprite_names: vec![],
+            face_shade: CompiledPack::vanilla_face_shade(),
+            models: vec![],
+            anims: vec![],
+        }
     }
 }
 

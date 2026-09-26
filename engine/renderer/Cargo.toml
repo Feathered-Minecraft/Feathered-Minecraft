@@ -13,3 +13,6 @@ feathered-assets.workspace = true
 wgpu.workspace = true
 pollster.workspace = true
 bytemuck.workspace = true
+
+[dev-dependencies]
+image.workspace = true

@@ -11,6 +11,9 @@ name = "feathered"
 path = "src/main.rs"
 
 [dependencies]
+feathered-packs.workspace = true
+serde_json.workspace = true
+dirs = "6"
 feathered-client.workspace = true
 feathered-renderer.workspace = true
 feathered-chunk.workspace = true
