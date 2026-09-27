@@ -27,9 +27,13 @@ struct SceneGlobals {
 @group(0) @binding(0) var<uniform> globals: SceneGlobals;
 // Group 1 (screen + outline layouts both carry it; the outline pass never
 // samples — outline vertices pass the flat-UV sentinel): the overlay art
-// texture (logo) + linear sampler.
+// textures (logo + full-screen menu background) + one linear sampler.
+// UV sentinels: x < 0 = flat quad; 0..1 = logo; x > 1 = background at
+// (x - 1, y).
 @group(1) @binding(1) var screen_tex: texture_2d<f32>;
 @group(1) @binding(2) var screen_samp: sampler;
+@group(1) @binding(3) var bg_tex: texture_2d<f32>;
+@group(1) @binding(4) var bg_samp: sampler;
 
 struct VsOut {
     @builtin(position) clip: vec4<f32>,
@@ -76,6 +80,10 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     // texel (straight-alpha PNG art × per-vertex straight-alpha tint).
     if (in.uv.x < 0.0) {
         return in.color;
+    }
+    if (in.uv.x > 1.0) {
+        let bg = textureSample(bg_tex, bg_samp, vec2<f32>(in.uv.x - 1.0, in.uv.y));
+        return bg * in.color;
     }
     let tex = textureSample(screen_tex, screen_samp, in.uv);
     return tex * in.color;

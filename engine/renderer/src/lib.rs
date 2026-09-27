@@ -339,6 +339,10 @@ struct OverlayState {
     logo_view: wgpu::TextureView,
     logo_sampler: wgpu::Sampler,
     logo_bind: wgpu::BindGroup,
+    /// Full-screen menu background art (second texture slot, bindings 3/4).
+    bg_tex: Option<wgpu::Texture>,
+    bg_view: wgpu::TextureView,
+    bg_sampler: wgpu::Sampler,
     /// Texture bind group layout (reused when the logo is re-uploaded).
     tex_bgl: wgpu::BindGroupLayout,
     /// Outline pass binds the shared globals (view_proj) + scene depth.
@@ -467,6 +471,22 @@ impl OverlayState {
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
@@ -602,14 +622,35 @@ impl OverlayState {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
             ],
         });
+        // Background fallback: 1×1 transparent (menu_background.png
+        // replaces it; until then bg quads draw nothing).
+        let (bg_view, bg_sampler) = (logo_view.clone(), logo_sampler.clone());
         let logo_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("overlay-tex-bg"),
             layout: &tex_bgl,
             entries: &[
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&logo_view) },
                 wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&logo_sampler) },
+                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&bg_view) },
+                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::Sampler(&bg_sampler) },
             ],
         });
         // Rebuild the screen pipelines: their layout now includes the texture
@@ -689,6 +730,9 @@ impl OverlayState {
             logo_view,
             logo_sampler,
             logo_bind,
+            bg_tex: None,
+            bg_view,
+            bg_sampler,
             tex_bgl,
             outline_pipeline,
             outline_pipeline_capture,
@@ -703,6 +747,21 @@ impl OverlayState {
             outline_icap: Self::INITIAL_INDICES,
             outline_count: 0,
         }
+    }
+
+    /// Rebuild the shared texture bind group after a background upload
+    /// (bindings 3/4 swap to the new view; logo slots are re-bound as-is).
+    fn bg_bind_rebuild(&mut self, device: &wgpu::Device, view: &wgpu::TextureView) {
+        self.logo_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("overlay-tex-bg"),
+            layout: &self.tex_bgl,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&self.logo_view) },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&self.logo_sampler) },
+                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(view) },
+                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::Sampler(&self.bg_sampler) },
+            ],
+        });
     }
 
     /// Grow a buffer pair when a draw list outgrew it, then upload the
@@ -834,6 +893,8 @@ pub struct Renderer {
     /// Logo set before overlay init (rare: one-frame delay). Flushed when
     /// the overlay state is created in `set_overlay`.
     pending_logo: Option<(u32, u32, Vec<u8>)>,
+    /// Background set before overlay init (flushed in set_overlay).
+    pending_bg: Option<(u32, u32, Vec<u8>)>,
 }
 
 /// Offscreen targets for the scene path (both legacy and staged share these;
@@ -1266,6 +1327,7 @@ impl Renderer {
 
         Renderer {
             pending_logo: None,
+            pending_bg: None,
             device,
             queue,
             surface,
@@ -2419,9 +2481,12 @@ impl Renderer {
                 &self.globals_bind,
             ));
         }
-        // Flush a logo that arrived before overlay init.
+        // Flush art that arrived before overlay init.
         if let Some((w, h, rgba)) = self.pending_logo.take() {
             Self::upload_logo(self.overlay.as_mut().unwrap(), &self.device, &self.queue, w, h, rgba);
+        }
+        if let Some((w, h, rgba)) = self.pending_bg.take() {
+            Self::upload_bg(self.overlay.as_mut().unwrap(), &self.device, &self.queue, w, h, rgba);
         }
         self.pending_overlay = Some(draw);
     }
@@ -2468,10 +2533,51 @@ impl Renderer {
             entries: &[
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&view) },
                 wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&ov.logo_sampler) },
+                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&ov.bg_view) },
+                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::Sampler(&ov.bg_sampler) },
             ],
         });
         ov.logo_view = view;
         ov.logo_tex = Some(tex);
+    }
+
+    /// Set the full-screen menu background art (menu_background.png).
+    /// RGBA8, straight alpha; UV-mapped 0..1 across the quad.
+    pub fn set_menu_background(&mut self, width: u32, height: u32, rgba: Vec<u8>) {
+        let Some(ov) = &mut self.overlay else {
+            self.pending_bg = Some((width, height, rgba));
+            return;
+        };
+        Self::upload_bg(ov, &self.device, &self.queue, width, height, rgba);
+    }
+
+    fn upload_bg(
+        ov: &mut OverlayState,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        width: u32,
+        height: u32,
+        rgba: Vec<u8>,
+    ) {
+        let tex = device.create_texture_with_data(
+            queue,
+            &wgpu::TextureDescriptor {
+                label: Some("overlay-menu-bg"),
+                size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            },
+            wgpu::util::TextureDataOrder::LayerMajor,
+            &rgba,
+        );
+        let view = tex.create_view(&Default::default());
+        ov.bg_bind_rebuild(device, &view);
+        ov.bg_view = view;
+        ov.bg_tex = Some(tex);
     }
 
     /// Change quality at runtime (also used by the F4 hotkey). Clears any

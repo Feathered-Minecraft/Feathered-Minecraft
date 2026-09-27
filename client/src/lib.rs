@@ -802,8 +802,18 @@ pub fn run(opts: RunOptions) -> Result<(), Box<dyn std::error::Error>> {
             .map(|img| img.to_rgba8())
             .map(|rgba| {
                 let (w, h) = rgba.dimensions();
-                (w, h, rgba.into_raw(), w as f32 / h as f32)
+                // Crop transparent canvas padding so the feather fills its
+                // box like the mock's art.
+                let (rgba, w, h) = menu::crop_to_alpha(rgba.into_raw(), w, h);
+                (w, h, rgba, w as f32 / h as f32)
             })
+    });
+    let background = std::fs::read("background.png").ok().and_then(|bytes| {
+        image::load_from_memory(&bytes).ok().map(|img| {
+            let rgba = img.to_rgba8();
+            let (w, h) = rgba.dimensions();
+            (w, h, rgba.into_raw())
+        })
     });
     let app = App {
         state: None,
@@ -811,6 +821,7 @@ pub fn run(opts: RunOptions) -> Result<(), Box<dyn std::error::Error>> {
         atlas: None,
         pending_world: None,
         logo,
+        background,
         logo_applied: false,
     };
     event_loop.run_app(app)?;
@@ -828,6 +839,8 @@ struct App {
     /// Title-screen logo art (pixels + aspect), uploaded to the renderer
     /// once the overlay initializes.
     logo: Option<(u32, u32, Vec<u8>, f32)>,
+    /// Full-screen menu background (background.png), same lifecycle.
+    background: Option<(u32, u32, Vec<u8>)>,
     logo_applied: bool,
 }
 
@@ -956,9 +969,10 @@ impl ApplicationHandler for App {
                 renderer.set_day_fraction(Some(0.08));
                 let profile = profile::ProfileStore::new(self.opts.worlds_dir.join("profile")).load();
                 let mut menu = menu::MenuState::new(&self.opts.worlds_dir, settings, profile);
-                // The title screen draws its own logo art (logo.png), and the
-                // backdrop is the live sky pinned to a sunset fraction.
+                // The title screen draws its own logo art (logo.png) over
+                // the user-supplied background (background.png) + fade.
                 menu.logo_art = self.logo.as_ref().map(|l| l.3);
+                menu.background = self.background.is_some();
                 let camera = feathered_renderer::Camera {
                     pos: [0.0, 80.0, 0.0],
                     yaw: 0.0,
@@ -1357,12 +1371,13 @@ impl ApplicationHandler for App {
         // initializes it lazily; the first frame may miss the art).
         if !self.logo_applied {
             if state.renderer.as_ref().map(|r| r.overlay_ready()).unwrap_or(false) {
-                if let Some((w, h, rgba, _)) = &self.logo {
-                    if let Some(r) = &mut state.renderer {
+                if let Some(r) = &mut state.renderer {
+                    if let Some((w, h, rgba, _)) = &self.logo {
                         r.set_logo_texture(*w, *h, rgba.clone());
-                        self.logo_applied = true;
                     }
-                } else {
+                    if let Some((w, h, rgba)) = &self.background {
+                        r.set_menu_background(*w, *h, rgba.clone());
+                    }
                     self.logo_applied = true;
                 }
             }

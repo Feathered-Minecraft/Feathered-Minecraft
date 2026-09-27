@@ -103,13 +103,41 @@ impl TriList {
         d: [f32; 2],
         color: [u8; 4],
     ) {
+        self.textured_quad_uv(a, b, c, d, color, false);
+    }
+
+    /// Textured quad sampling the *menu background* texture (the shader
+    /// remaps x > 1 UVs to that slot: `uv = (x - 1, y)`).
+    pub fn background_quad(
+        &mut self,
+        a: [f32; 2],
+        b: [f32; 2],
+        c: [f32; 2],
+        d: [f32; 2],
+        color: [u8; 4],
+    ) {
+        self.textured_quad_uv(a, b, c, d, color, true);
+    }
+
+    fn textured_quad_uv(
+        &mut self,
+        a: [f32; 2],
+        b: [f32; 2],
+        c: [f32; 2],
+        d: [f32; 2],
+        color: [u8; 4],
+        background: bool,
+    ) {
         let base = self.vertices.len() as u32;
         let z = 0.0;
+        // v flipped: UV 0 = top row of the source image. Background quads
+        // carry x+1 so the fragment shader routes them to the bg slot.
+        let ox = if background { 1.0 } else { 0.0 };
         let uvs = [
-            [0.0, 1.0], // a: bottom-left (v flipped: UV 0 = top row)
-            [1.0, 1.0], // b: bottom-right
-            [1.0, 0.0], // c: top-right
-            [0.0, 0.0], // d: top-left
+            [ox, 1.0], // a: bottom-left
+            [1.0 + ox, 1.0], // b: bottom-right
+            [1.0 + ox, 0.0], // c: top-right
+            [ox, 0.0], // d: top-left
         ];
         for (p, uv) in [(a, uvs[0]), (b, uvs[1]), (c, uvs[2]), (d, uvs[3])] {
             self.vertices.push(HudVertex {

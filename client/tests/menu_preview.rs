@@ -70,9 +70,10 @@ fn menu_title_preview() {
     {
         Some(rgba) => {
             let (lw, lh) = rgba.dimensions();
+            let (px, lw, lh) = feathered_client::menu::crop_to_alpha(rgba.into_raw(), lw, lh);
             menu.logo_art = Some(lw as f32 / lh as f32);
             r.set_overlay(HudDraw::default());
-            r.set_logo_texture(lw, lh, rgba.into_raw());
+            r.set_logo_texture(lw, lh, px);
         }
         None => {
             let mut tex = vec![0u8; 64 * 64 * 4];
@@ -104,28 +105,29 @@ fn menu_title_preview() {
     assert_eq!(r.frame_size(), (W, H));
     save_png("target/menu-ui-preview.png", &frame, W, H);
 
-    // Panel side near-black; sky side carries the sunset band (warmer than
-    // the panel); feather art upper-left is bright (white art).
+    // Fade panel: left edge near-black; right side lighter (fade eases out
+    // over the sky clear color). No background.png in tests → sky shows.
     let px = |x: u32, y: u32| {
         let i = ((y * W + x) * 4) as usize;
         [frame[i], frame[i + 1], frame[i + 2]]
     };
-    let panel = px(8, 8);
+    let left = px(8, 8);
+    let right = px(W - 60, H - 60);
+    let ll = left.iter().map(|&c| c as u32).sum::<u32>();
+    let rl = right.iter().map(|&c| c as u32).sum::<u32>();
     assert!(
-        panel[0] < 30 && panel[1] < 36 && panel[2] < 60,
-        "panel side should be near-black (sky tint acceptable), got {panel:?}"
+        ll < 100,
+        "fade left edge should be near-black, got {left:?}"
     );
-    let sky = px(W - 60, H - 60);
     assert!(
-        sky != panel,
-        "sky side should show the sunset sky, got {sky:?} vs panel {panel:?}"
+        rl > ll,
+        "fade should ease out to the right (left {left:?} vs right {right:?})"
     );
     // Feather band upper-left: brighter than the panel (white art + tint).
     let feather = px(120, 120);
     let fl = feather.iter().map(|&c| c as u32).sum::<u32>();
-    let pl = panel.iter().map(|&c| c as u32).sum::<u32>();
     assert!(
-        fl > pl + 40,
+        fl > ll + 40,
         "feather art should brighten the panel, got {feather:?}"
     );
 }

@@ -118,6 +118,9 @@ pub struct MenuState {
     /// Logo art aspect (width/height) when logo.png loaded; None = draw no
     /// textured quad (the renderer's fallback texture is transparent).
     pub logo_art: Option<f32>,
+    /// Background art uploaded (background.png); gates the full-screen quad
+    /// (without it the fallback texture is transparent and nothing draws).
+    pub background: bool,
     /// Last computed widget rects (rebuilt each draw).
     hits: Hits,
     /// Cached skin preview palette.
@@ -223,6 +226,40 @@ pub fn lin_bytes(c: [u8; 4]) -> [u8; 4] {
     lin4(c)
 }
 
+/// Crop an RGBA image to its opaque content bounds (the logo PNG carries
+/// transparent canvas padding; the mock's feather fills its box). Returns
+/// the cropped pixels + dimensions, or the input untouched when fully
+/// transparent/1×1.
+pub fn crop_to_alpha(rgba: Vec<u8>, w: u32, h: u32) -> (Vec<u8>, u32, u32) {
+    let mut min_x = w;
+    let mut min_y = h;
+    let mut max_x = 0u32;
+    let mut max_y = 0u32;
+    for y in 0..h {
+        for x in 0..w {
+            let a = rgba[((y * w + x) * 4 + 3) as usize];
+            if a > 8 {
+                min_x = min_x.min(x);
+                min_y = min_y.min(y);
+                max_x = max_x.max(x + 1);
+                max_y = max_y.max(y + 1);
+            }
+        }
+    }
+    if min_x >= max_x || min_y >= max_y {
+        return (rgba, w, h);
+    }
+    let cw = max_x - min_x;
+    let ch = max_y - min_y;
+    let mut out = vec![0u8; (cw * ch * 4) as usize];
+    for y in 0..ch {
+        let src = ((min_y + y) * w + min_x) as usize * 4;
+        let dst = (y * cw) as usize * 4;
+        out[dst..dst + (cw * 4) as usize].copy_from_slice(&rgba[src..src + (cw * 4) as usize]);
+    }
+    (out, cw, ch)
+}
+
 impl MenuState {
     pub fn new(worlds_dir: &Path, settings: Settings, profile: Profile) -> MenuState {
         MenuState {
@@ -252,6 +289,7 @@ impl MenuState {
             cursor: (0.0, 0.0),
             settings_dir: worlds_dir.to_path_buf(),
             logo_art: None,
+            background: false,
             hits: Hits::default(),
             preview: None,
         }
@@ -756,40 +794,39 @@ impl MenuState {
         let cx = layout.cx();
         match self.screen {
             Screen::Title => {
-                // Sunset panorama first (screen-space), then the panel
-                // gradient reads over it like the mock's dark left side.
-                draw_panorama(list, w, hgt);
-                // Reference backdrop: dark panel over the panorama — opaque
-                // on the left where the brand + menu live, easing out so the
-                // sunset reads on the right. Colors linearized for sRGB.
-                let steps = 16;
-                let panel_w = w * 0.62;
+                // Full-screen background image (background.png) when the app
+                // loaded one; the fallback texture is transparent so the sky
+                // shows through until then.
+                if self.background {
+                    list.background_quad(
+                        [0.0, 0.0],
+                        [w, 0.0],
+                        [w, hgt],
+                        [0.0, hgt],
+                        lin4([255, 255, 255, 255]),
+                    );
+                }
+                // The fade: opaque on the left where the brand + menu live,
+                // easing out to the right so the art reads. Held ~55% then
+                // eased (the mock's panel stays dark under the whole menu).
+                let steps = 24;
+                let panel_w = w * 0.66;
                 let step_w = panel_w / steps as f32;
                 for i in 0..steps {
-                    // Hold full opacity for ~55% of the panel, then ease out
-                    // (the mock's panel stays dark under the whole menu).
                     let t = i as f32 / steps as f32;
                     let a: u8 = if t < 0.55 {
-                        255
+                        252
                     } else {
-                        (255.0 * (1.0 - (t - 0.55) / 0.45)) as u8
+                        (252.0 * (1.0 - (t - 0.55) / 0.45)) as u8
                     };
                     list.quad(
                         [i as f32 * step_w, 0.0],
                         [(i + 1) as f32 * step_w, 0.0],
                         [(i + 1) as f32 * step_w, hgt],
                         [i as f32 * step_w, hgt],
-                        lin4([7, 10, 14, a]),
+                        lin4([10, 12, 16, a]),
                     );
                 }
-                // Gentle dim over the exposed sky so it stays moody.
-                list.quad(
-                    [panel_w, 0.0],
-                    [w, 0.0],
-                    [w, hgt],
-                    [panel_w, hgt],
-                    lin4([7, 10, 14, 40]),
-                );
                 // Feather art (white on transparency) upper-left; the
                 // transparent canvas padding shows the panel behind.
                 if let Some(art) = self.logo_art {
@@ -833,6 +870,17 @@ impl MenuState {
                     } else {
                         (lin4([22, 24, 28, 200]), lin4([225, 228, 232, 255]))
                     };
+                    // Left-edge diamond node (the mock's dotted rail).
+                    let dcx = menu_x - 12.0;
+                    let dcy = y + row_h / 2.0;
+                    let d = 4.0;
+                    list.quad(
+                        [dcx - d, dcy],
+                        [dcx, dcy - d],
+                        [dcx + d, dcy],
+                        [dcx, dcy + d],
+                        lin4([150, 155, 165, 220]),
+                    );
                     // Icon box + glyph.
                     list.quad([r[0], r[1]], [r[0] + icon, r[1]], [r[0] + icon, r[1] + icon], [r[0], r[1] + icon], face);
                     icon_fn(r[0] + 7.0, r[1] + 7.0, icon - 14.0, icon - 14.0, list, glyph);
@@ -1040,107 +1088,6 @@ fn draw_avatar(list: &mut TriList, x: f32, y: f32, p: SkinPaletteCache) {
     let leg_w = torso_w / 2.0;
     list.quad([x, ly], [x + leg_w, ly], [x + leg_w, ly + leg_h], [x, ly + leg_h], p.legs);
     list.quad([x + leg_w, ly], [x + torso_w, ly], [x + torso_w, ly + leg_h], [x + leg_w, ly + leg_h], p.legs);
-}
-
-/// Title logo: big blocky wordmark (the microfont scaled with a shadow).
-/// Skyline panorama for the title's sky side, authored in SCREEN space
-/// (behind the left panel gradient): sunset gradient bands, low blocky
-/// sun, jagged mountain silhouette, and water with warm shimmer rows.
-/// Deterministic LCG keeps the ridge stable frame to frame.
-fn draw_panorama(list: &mut TriList, w: f32, h: f32) {
-    let horizon = h * 0.46;
-    // Sunset sky bands above the horizon (top → horizon, warmest last).
-    let bands: [([u8; 3], f32); 5] = [
-        ([24, 28, 46], 0.00),   // top: deep blue
-        ([88, 44, 60], 0.42),   // violet
-        ([190, 84, 46], 0.68),  // ember
-        ([240, 140, 70], 0.86), // gold
-        ([255, 190, 120], 0.97),// glow at horizon
-    ];
-    for (i, (rgb, fy)) in bands.iter().enumerate() {
-        // fy is a fraction OF the horizon (bands stack 0 → horizon).
-        let y0 = horizon * fy;
-        let y1 = match bands.get(i + 1) {
-            Some((_, f2)) => horizon * f2,
-            None => horizon,
-        };
-        if y1 - y0 <= 0.0 {
-            continue;
-        }
-        list.quad(
-            [0.0, y0],
-            [w, y0],
-            [w, y1],
-            [0.0, y1],
-            lin4([rgb[0], rgb[1], rgb[2], 255]),
-        );
-    }
-    // Blocky sun above the ridge crest on the sky side (mock: ~84% width).
-    let sun_x = w * 0.84;
-    let sun_y = horizon - h * 0.095;
-    let s = h * 0.042;
-    list.quad(
-        [sun_x - s, sun_y - s],
-        [sun_x + s, sun_y - s],
-        [sun_x + s, sun_y + s],
-        [sun_x - s, sun_y + s],
-        lin4([255, 214, 150, 255]),
-    );
-    let c = s * 0.55;
-    list.quad(
-        [sun_x - c, sun_y - c],
-        [sun_x + c, sun_y - c],
-        [sun_x + c, sun_y + c],
-        [sun_x - c, sun_y + c],
-        lin4([255, 244, 214, 255]),
-    );
-    // Jagged ridge (deterministic); the panel gradient covers its left part.
-    let mut seed: u32 = 0xFE_8712;
-    let mut x = 0.0f32;
-    while x < w {
-        let seg_w = w * 0.018 + (seed % 17) as f32 * w * 0.0016;
-        seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-        let hh = h * 0.028 + (seed % 30) as f32 * h * 0.0010;
-        seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-        list.quad(
-            [x, horizon - 2.0],
-            [x + seg_w, horizon - 2.0],
-            [x + seg_w, horizon - 2.0 - hh],
-            [x, horizon - 2.0 - hh],
-            lin4([12, 14, 22, 255]),
-        );
-        x += seg_w * 0.92;
-    }
-    // Water: dark base below the horizon + warm shimmer rows near the
-    // sun column (right side; the panel covers the left).
-    list.quad(
-        [0.0, horizon],
-        [w, horizon],
-        [w, h],
-        [0.0, h],
-        lin4([10, 14, 24, 255]),
-    );
-    let mut sseed: u32 = 0xC0_FFEE;
-    let mut wy = horizon + 4.0;
-    while wy < h * 0.94 {
-        sseed = sseed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-        let len = w * 0.03 + (sseed % 90) as f32 * w * 0.0009;
-        sseed = sseed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-        let cx = sun_x - len / 2.0 + (sseed % 40) as f32 - 20.0;
-        let depth = (wy - horizon) / (h - horizon);
-        let warm = (235.0 * (1.0 - depth)) as u16;
-        let g = (warm * 3 / 4) as u8;
-        let b = (warm / 2).min(40) as u8;
-        let warm = warm as u8;
-        list.quad(
-            [cx, wy],
-            [cx + len, wy],
-            [cx + len, wy + 1.4],
-            [cx, wy + 1.4],
-            lin4([warm, g, b, 190]),
-        );
-        wy += 5.0 + (sseed % 5) as f32;
-    }
 }
 
 /// Title branding block (reference layout): FEATHERED wordmark with side
