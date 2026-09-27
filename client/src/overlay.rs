@@ -20,18 +20,21 @@
 
 /// Vertex for overlay triangles: position is either UI pixels (screen
 /// pass) or world blocks (outline pass) — the two pipelines differ only in
-/// the uniform they bind. Color is straight RGBA8; `px` is unused padding
-/// kept so screen and outline vertices share one format (and one upload
-/// layout) in the renderer. 24 bytes (12 pos + 4 color + 8 px).
+/// the uniform they bind. Color is straight RGBA8; `px` carries UVs into
+/// the overlay art texture on the screen pass (x < 0 = flat, untinted by
+/// any texture) and is unused on the outline pass. `uv` is reserved
+/// padding so screen and outline vertices share one format. 32 bytes
+/// (12 pos + 4 color + 8 px + 8 uv).
 #[repr(C)]
 #[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct HudVertex {
     pub pos: [f32; 3], // z = 0 (screen) / unused (outline)
     pub color: [u8; 4],
-    pub px: [f32; 2],  // reserved for the text SDF pass
+    pub px: [f32; 2],  // screen pass: UV (x < 0 = flat quad)
+    pub uv: [f32; 2],  // reserved
 }
 
-const _: () = assert!(std::mem::size_of::<HudVertex>() == 24);
+const _: () = assert!(std::mem::size_of::<HudVertex>() == 32);
 
 /// Projection uniforms for the screen-space pass (UI pixels → NDC).
 #[repr(C)]
@@ -67,13 +70,16 @@ impl TriList {
     /// Push one 2D quad (a=bottom-left … d=top-left, CCW, screen space).
     pub fn quad(&mut self, a: [f32; 2], b: [f32; 2], c: [f32; 2], d: [f32; 2], color: [u8; 4]) {
         // a=bottom-left, b=bottom-right, c=top-right, d=top-left (CCW).
+        // Flat quads carry the UV sentinel (x < 0) so the fragment shader
+        // shades them by color alone (px was pixel padding pre-textures).
         let base = self.vertices.len() as u32;
         let z = 0.0;
-        for (p, pr) in [(a, a), (b, b), (c, c), (d, d)] {
+        for p in [(a), (b), (c), (d)] {
             self.vertices.push(HudVertex {
                 pos: [p[0], p[1], z],
                 color,
-                px: pr,
+                px: [-1.0, 0.0],
+                uv: [0.0; 2],
             });
         }
         self.indices
@@ -83,6 +89,38 @@ impl TriList {
     /// True when nothing has been authored into this list.
     pub fn is_empty(&self) -> bool {
         self.indices.is_empty()
+    }
+
+    /// Push one texture-mapped quad sampling `tex` (full 0..1 UVs; the
+    /// texture is set separately via the renderer's `set_logo_texture`):
+    /// a=bottom-left … d=top-left, CCW, UI pixels. The tint color multiplies
+    /// the sampled texels (straight alpha × straight alpha).
+    pub fn textured_quad(
+        &mut self,
+        a: [f32; 2],
+        b: [f32; 2],
+        c: [f32; 2],
+        d: [f32; 2],
+        color: [u8; 4],
+    ) {
+        let base = self.vertices.len() as u32;
+        let z = 0.0;
+        let uvs = [
+            [0.0, 1.0], // a: bottom-left (v flipped: UV 0 = top row)
+            [1.0, 1.0], // b: bottom-right
+            [1.0, 0.0], // c: top-right
+            [0.0, 0.0], // d: top-left
+        ];
+        for (p, uv) in [(a, uvs[0]), (b, uvs[1]), (c, uvs[2]), (d, uvs[3])] {
+            self.vertices.push(HudVertex {
+                pos: [p[0], p[1], z],
+                color,
+                px: uv,
+                uv: [0.0; 2],
+            });
+        }
+        self.indices
+            .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
     }
 }
 
@@ -279,8 +317,9 @@ pub fn build_block_outline(list: &mut TriList, x: i64, y: i64, z: i64, expand: f
 }
 
 impl TriList {
-    /// World-space quad (3D positions) — used by the outline builder.
-    fn quad3(
+    /// World-space quad (3D positions) — used by the outline builder and
+    /// the menu's skyline panorama (flat-UV sentinel, color-shaded).
+    pub fn quad3(
         &mut self,
         a: [f32; 3],
         b: [f32; 3],
@@ -293,7 +332,8 @@ impl TriList {
             self.vertices.push(HudVertex {
                 pos: p,
                 color,
-                px: [0.0; 2],
+                px: [-1.0, 0.0], // outlines never sample
+                uv: [0.0; 2],
             });
         }
         self.indices

@@ -115,6 +115,9 @@ pub struct MenuState {
     pub cursor: (f32, f32),
     /// Worlds root (settings.json lives here; set at construction).
     settings_dir: PathBuf,
+    /// Logo art aspect (width/height) when logo.png loaded; None = draw no
+    /// textured quad (the renderer's fallback texture is transparent).
+    pub logo_art: Option<f32>,
     /// Last computed widget rects (rebuilt each draw).
     hits: Hits,
     /// Cached skin preview palette.
@@ -137,10 +140,8 @@ pub enum ServerFocus {
 pub enum ProfileFocus {
     Name,
     None,
-}
-
-/// Cached avatar palette (head/body/legs) for the profile screen.
-#[derive(Debug, Clone, Copy)]
+}    /// Cached avatar palette (head/body/legs) for the profile screen.
+    #[derive(Debug, Clone, Copy)]
 pub struct SkinPaletteCache {
     pub head: [u8; 4],
     pub body: [u8; 4],
@@ -191,6 +192,37 @@ struct Hits {
     skin_back: Option<Rect>,
 }
 
+/// sRGB byte → linear byte (exact transfer curve), for authoring overlay
+/// colors that must land as the authored byte on the renderer's sRGB
+/// targets (the overlay shader's straight bytes are treated as linear).
+fn lin(c: u8) -> u8 {
+    static LUT: std::sync::OnceLock<[u8; 256]> = std::sync::OnceLock::new();
+    let lut = LUT.get_or_init(|| {
+        let mut table = [0u8; 256];
+        for (i, slot) in table.iter_mut().enumerate() {
+            let s = i as f64 / 255.0;
+            let l = if s <= 0.04045 {
+                s / 12.92
+            } else {
+                ((s + 0.055) / 1.055).powf(2.4)
+            };
+            *slot = (l * 255.0).round() as u8;
+        }
+        table
+    });
+    lut[c as usize]
+}
+
+/// Decode a whole RGBA color (leaves alpha untouched).
+fn lin4(c: [u8; 4]) -> [u8; 4] {
+    [lin(c[0]), lin(c[1]), lin(c[2]), c[3]]
+}
+
+/// Public linearize entry for sibling modules (ui.rs palettes).
+pub fn lin_bytes(c: [u8; 4]) -> [u8; 4] {
+    lin4(c)
+}
+
 impl MenuState {
     pub fn new(worlds_dir: &Path, settings: Settings, profile: Profile) -> MenuState {
         MenuState {
@@ -219,6 +251,7 @@ impl MenuState {
             toast: String::new(),
             cursor: (0.0, 0.0),
             settings_dir: worlds_dir.to_path_buf(),
+            logo_art: None,
             hits: Hits::default(),
             preview: None,
         }
@@ -723,8 +756,56 @@ impl MenuState {
         let cx = layout.cx();
         match self.screen {
             Screen::Title => {
-                draw_logo(list, cx, layout.logo_y());
-                // Hover feedback: brighten the button under the cursor.
+                // Sunset panorama first (screen-space), then the panel
+                // gradient reads over it like the mock's dark left side.
+                draw_panorama(list, w, hgt);
+                // Reference backdrop: dark panel over the panorama — opaque
+                // on the left where the brand + menu live, easing out so the
+                // sunset reads on the right. Colors linearized for sRGB.
+                let steps = 16;
+                let panel_w = w * 0.62;
+                let step_w = panel_w / steps as f32;
+                for i in 0..steps {
+                    // Hold full opacity for ~55% of the panel, then ease out
+                    // (the mock's panel stays dark under the whole menu).
+                    let t = i as f32 / steps as f32;
+                    let a: u8 = if t < 0.55 {
+                        255
+                    } else {
+                        (255.0 * (1.0 - (t - 0.55) / 0.45)) as u8
+                    };
+                    list.quad(
+                        [i as f32 * step_w, 0.0],
+                        [(i + 1) as f32 * step_w, 0.0],
+                        [(i + 1) as f32 * step_w, hgt],
+                        [i as f32 * step_w, hgt],
+                        lin4([7, 10, 14, a]),
+                    );
+                }
+                // Gentle dim over the exposed sky so it stays moody.
+                list.quad(
+                    [panel_w, 0.0],
+                    [w, 0.0],
+                    [w, hgt],
+                    [panel_w, hgt],
+                    lin4([7, 10, 14, 40]),
+                );
+                // Feather art (white on transparency) upper-left; the
+                // transparent canvas padding shows the panel behind.
+                if let Some(art) = self.logo_art {
+                    let art_h = hgt * 0.32;
+                    let art_w = art_h * art;
+                    let (ax, ay) = (18.0, 40.0);
+                    list.textured_quad(
+                        [ax, ay],
+                        [ax + art_w, ay],
+                        [ax + art_w, ay + art_h],
+                        [ax, ay + art_h],
+                        lin4([250, 250, 252, 255]),
+                    );
+                }
+                draw_branding(list, w, hgt);
+                // Hover feedback: brighten the entry under the cursor.
                 let hover = |r: [f32; 4]| {
                     if ui::hit(r, self.cursor) {
                         Hover::Hovered
@@ -732,54 +813,60 @@ impl MenuState {
                         Hover::Idle
                     }
                 };
-                let y0 = ui::stack_y(4, hgt) + 40.0;
-                let sp_rect = [cx - BUTTON_W / 2.0, y0, BUTTON_W, BUTTON_H];
-                let mp_rect = [cx - BUTTON_W / 2.0, y0 + (BUTTON_H + BUTTON_GAP), BUTTON_W, BUTTON_H];
-                self.hits.singleplayer = Some(sp_rect);
-                self.hits.multiplayer = Some(mp_rect);
-                ui::button(list, cx, y0, BUTTON_W, "SINGLEPLAYER", hover(sp_rect));
-                ui::button(
-                    list,
-                    cx,
-                    mp_rect[1],
-                    BUTTON_W,
-                    "MULTIPLAYER",
-                    hover(mp_rect),
-                );
-                // Settings + Profile share a row (half width each).
-                let row_y = y0 + 2.0 * (BUTTON_H + BUTTON_GAP);
-                let half = (BUTTON_W - BUTTON_GAP) / 2.0;
-                let settings_rect = [cx - half / 2.0 - BUTTON_GAP / 2.0, row_y, half, BUTTON_H];
-                let profile_rect = [cx + half / 2.0 + BUTTON_GAP / 2.0, row_y, half, BUTTON_H];
-                self.hits.settings = Some(settings_rect);
+                // Icon menu (reference): box icon + label + underline rule.
+                let menu_x = 20.0;
+                let row_h = 52.0;
+                let row_w = 236.0;
+                let icon = 34.0;
+                let y0 = hgt * 0.50;
+                type IconFn = fn(f32, f32, f32, f32, &mut TriList, [u8; 4]);
+                let rows: [(&str, &str, IconFn); 3] = [
+                    ("singleplayer", "Play", draw_icon_play),
+                    ("settings", "Settings", draw_icon_gear),
+                    ("quit", "Quit", draw_icon_power),
+                ];
+                for (i, (key, label, icon_fn)) in rows.iter().enumerate() {
+                    let y = y0 + i as f32 * (row_h + 10.0);
+                    let r = [menu_x, y, row_w, row_h];
+                    let (face, glyph) = if hover(r) == Hover::Hovered {
+                        (lin4([34, 37, 44, 220]), lin4([250, 250, 250, 255]))
+                    } else {
+                        (lin4([22, 24, 28, 200]), lin4([225, 228, 232, 255]))
+                    };
+                    // Icon box + glyph.
+                    list.quad([r[0], r[1]], [r[0] + icon, r[1]], [r[0] + icon, r[1] + icon], [r[0], r[1] + icon], face);
+                    icon_fn(r[0] + 7.0, r[1] + 7.0, icon - 14.0, icon - 14.0, list, glyph);
+                    // Label + underline rule.
+                    font::draw_text_shadow(list, label, r[0] + icon + 14.0, r[1] + (icon - 7.0 * 2.0) / 2.0, 2.0, glyph);
+                    let ly = r[1] + row_h - 2.0;
+                    list.quad(
+                        [r[0], ly],
+                        [r[0] + row_w, ly],
+                        [r[0] + row_w, ly + 2.0],
+                        [r[0], ly + 2.0],
+                        if hover(r) == Hover::Hovered { lin4([235, 238, 242, 230]) } else { lin4([80, 84, 92, 190]) },
+                    );
+                    let slot = match *key {
+                        "singleplayer" => &mut self.hits.singleplayer,
+                        "settings" => &mut self.hits.settings,
+                        _ => &mut self.hits.quit,
+                    };
+                    *slot = Some(r);
+                }
+                // Bottom-left version block.
+                font::draw_text_shadow(list, "v1.0.0", 18.0, hgt - 44.0, 2.5, lin4([235, 235, 235, 255]));
+                font::draw_text_shadow(list, "Feathered Minecraft", 18.0, hgt - 18.0, 1.5, lin4([150, 155, 165, 235]));
+                // Bottom-right links: MULTIPLAYER · PROFILE (and the
+                // not-affiliated note on the far right, mock's link row).
+                let link_y = hgt - 20.0;
+                let lx = w - 18.0 - font::text_width("NOT AFFILIATED WITH MOJANG", 1.5);
+                font::draw_text_shadow(list, "NOT AFFILIATED WITH MOJANG", lx, link_y, 1.5, lin4([120, 126, 136, 210]));
+                let profile_rect = [lx - 90.0, link_y - 4.0, 80.0, 18.0];
                 self.hits.profile = Some(profile_rect);
-                ui::button(
-                    list,
-                    settings_rect[0] + half / 2.0,
-                    row_y,
-                    half,
-                    "SETTINGS",
-                    hover(settings_rect),
-                );
-                ui::button(
-                    list,
-                    profile_rect[0] + half / 2.0,
-                    row_y,
-                    half,
-                    "PROFILE",
-                    hover(profile_rect),
-                );
-                let quit_rect = [cx - BUTTON_W / 2.0, y0 + 3.0 * (BUTTON_H + BUTTON_GAP), BUTTON_W, BUTTON_H];
-                self.hits.quit = Some(quit_rect);
-                ui::button(list, cx, quit_rect[1], BUTTON_W, "QUIT GAME", hover(quit_rect));
-                font::draw_text_shadow(
-                    list,
-                    "FEATHERED — an independent voxel engine (not affiliated with Mojang)",
-                    cx - font::text_width("FEATHERED — an independent voxel engine (not affiliated with Mojang)", 1.5) / 2.0,
-                    hgt - 22.0,
-                    1.5,
-                    [200, 200, 205, 200],
-                );
+                font::draw_text_shadow(list, "PROFILE", profile_rect[0] + 8.0, link_y, 1.5, lin4([225, 228, 235, 240]));
+                let mp_rect = [profile_rect[0] - 150.0, link_y - 4.0, 140.0, 18.0];
+                self.hits.multiplayer = Some(mp_rect);
+                font::draw_text_shadow(list, "MULTIPLAYER", mp_rect[0] + 8.0, link_y, 1.5, lin4([225, 228, 235, 240]));
             }
             Screen::Worlds => {
                 font::draw_text_shadow(list, "SELECT WORLD", cx - font::text_width("SELECT WORLD", 3.0) / 2.0, layout.logo_y(), 3.0, [235, 235, 235, 255]);
@@ -956,19 +1043,162 @@ fn draw_avatar(list: &mut TriList, x: f32, y: f32, p: SkinPaletteCache) {
 }
 
 /// Title logo: big blocky wordmark (the microfont scaled with a shadow).
-fn draw_logo(list: &mut TriList, cx: f32, y: f32) {
-    const TEXT: &str = "FEATHERED";
-    const SCALE: f32 = 6.0;
-    let tw = font::text_width(TEXT, SCALE);
-    font::draw_text_shadow(list, TEXT, cx - tw / 2.0, y, SCALE, [235, 240, 250, 255]);
-    font::draw_text_shadow(
-        list,
-        "AN INDEPENDENT VOXEL ENGINE",
-        cx - font::text_width("AN INDEPENDENT VOXEL ENGINE", 1.5) / 2.0,
-        y + 7.0 * SCALE + 8.0,
-        1.5,
-        [180, 185, 195, 230],
+/// Skyline panorama for the title's sky side, authored in SCREEN space
+/// (behind the left panel gradient): sunset gradient bands, low blocky
+/// sun, jagged mountain silhouette, and water with warm shimmer rows.
+/// Deterministic LCG keeps the ridge stable frame to frame.
+fn draw_panorama(list: &mut TriList, w: f32, h: f32) {
+    let horizon = h * 0.46;
+    // Sunset sky bands above the horizon (top → horizon, warmest last).
+    let bands: [([u8; 3], f32); 5] = [
+        ([24, 28, 46], 0.00),   // top: deep blue
+        ([88, 44, 60], 0.42),   // violet
+        ([190, 84, 46], 0.68),  // ember
+        ([240, 140, 70], 0.86), // gold
+        ([255, 190, 120], 0.97),// glow at horizon
+    ];
+    for (i, (rgb, fy)) in bands.iter().enumerate() {
+        // fy is a fraction OF the horizon (bands stack 0 → horizon).
+        let y0 = horizon * fy;
+        let y1 = match bands.get(i + 1) {
+            Some((_, f2)) => horizon * f2,
+            None => horizon,
+        };
+        if y1 - y0 <= 0.0 {
+            continue;
+        }
+        list.quad(
+            [0.0, y0],
+            [w, y0],
+            [w, y1],
+            [0.0, y1],
+            lin4([rgb[0], rgb[1], rgb[2], 255]),
+        );
+    }
+    // Blocky sun above the ridge crest on the sky side (mock: ~84% width).
+    let sun_x = w * 0.84;
+    let sun_y = horizon - h * 0.095;
+    let s = h * 0.042;
+    list.quad(
+        [sun_x - s, sun_y - s],
+        [sun_x + s, sun_y - s],
+        [sun_x + s, sun_y + s],
+        [sun_x - s, sun_y + s],
+        lin4([255, 214, 150, 255]),
     );
+    let c = s * 0.55;
+    list.quad(
+        [sun_x - c, sun_y - c],
+        [sun_x + c, sun_y - c],
+        [sun_x + c, sun_y + c],
+        [sun_x - c, sun_y + c],
+        lin4([255, 244, 214, 255]),
+    );
+    // Jagged ridge (deterministic); the panel gradient covers its left part.
+    let mut seed: u32 = 0xFE_8712;
+    let mut x = 0.0f32;
+    while x < w {
+        let seg_w = w * 0.018 + (seed % 17) as f32 * w * 0.0016;
+        seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        let hh = h * 0.028 + (seed % 30) as f32 * h * 0.0010;
+        seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        list.quad(
+            [x, horizon - 2.0],
+            [x + seg_w, horizon - 2.0],
+            [x + seg_w, horizon - 2.0 - hh],
+            [x, horizon - 2.0 - hh],
+            lin4([12, 14, 22, 255]),
+        );
+        x += seg_w * 0.92;
+    }
+    // Water: dark base below the horizon + warm shimmer rows near the
+    // sun column (right side; the panel covers the left).
+    list.quad(
+        [0.0, horizon],
+        [w, horizon],
+        [w, h],
+        [0.0, h],
+        lin4([10, 14, 24, 255]),
+    );
+    let mut sseed: u32 = 0xC0_FFEE;
+    let mut wy = horizon + 4.0;
+    while wy < h * 0.94 {
+        sseed = sseed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        let len = w * 0.03 + (sseed % 90) as f32 * w * 0.0009;
+        sseed = sseed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        let cx = sun_x - len / 2.0 + (sseed % 40) as f32 - 20.0;
+        let depth = (wy - horizon) / (h - horizon);
+        let warm = (235.0 * (1.0 - depth)) as u16;
+        let g = (warm * 3 / 4) as u8;
+        let b = (warm / 2).min(40) as u8;
+        let warm = warm as u8;
+        list.quad(
+            [cx, wy],
+            [cx + len, wy],
+            [cx + len, wy + 1.4],
+            [cx, wy + 1.4],
+            lin4([warm, g, b, 190]),
+        );
+        wy += 5.0 + (sseed % 5) as f32;
+    }
+}
+
+/// Title branding block (reference layout): FEATHERED wordmark with side
+/// rules + letter-spaced MINECRAFT subtitle under the feather art.
+fn draw_branding(list: &mut TriList, w: f32, h: f32) {
+    const TEXT: &str = "FEATHERED";
+    // Scale 7 ≈ 32% of a 1280-wide frame; left-aligned like the mock.
+    let scale = 7.0f32;
+    let x = 42.0f32;
+    let y = h * 0.335;
+    let tw = font::text_width(TEXT, scale);
+    font::draw_text_shadow(list, TEXT, x, y, scale, lin4([240, 242, 246, 255]));
+    // Side rules flanking MINECRAFT (letter-spaced feel via extra scale-1
+    // gaps drawn between characters' widths).
+    let sub = "M I N E C R A F T";
+    let sub_scale = 2.0f32;
+    let sub_w = font::text_width(sub, sub_scale);
+    let sub_y = y + 7.0 * scale + 14.0;
+    font::draw_text_shadow(list, sub, x, sub_y, sub_scale, lin4([190, 194, 202, 240]));
+    let rule_y = sub_y + 9.0;
+    list.quad([x, rule_y], [x + 26.0, rule_y], [x + 26.0, rule_y + 2.0], [x, rule_y + 2.0], lin4([120, 126, 136, 220]));
+    list.quad([x + sub_w - 26.0, rule_y], [x + sub_w, rule_y], [x + sub_w, rule_y + 2.0], [x + sub_w - 26.0, rule_y + 2.0], lin4([120, 126, 136, 220]));
+    let _ = (w, tw); // width reference for future responsive scaling
+}
+
+// --- title icon glyphs (24×24-ish vector boxes, drawn as flat quads) ---
+
+fn draw_icon_play(x: f32, y: f32, w: f32, h: f32, list: &mut TriList, c: [u8; 4]) {
+    // Triangle pointing right, centered in the box.
+    let cx = x + w * 0.5;
+    let cy = y + h * 0.5;
+    let s = h * 0.32;
+    list.quad([cx - s * 0.55, cy - s], [cx - s * 0.55, cy + s], [cx + s * 0.9, cy], [cx - s * 0.55, cy - s], c);
+}
+
+fn draw_icon_gear(x: f32, y: f32, w: f32, h: f32, list: &mut TriList, c: [u8; 4]) {
+    // Ring + 4 notches (screen-space quad approximation of a gear).
+    let cx = x + w * 0.5;
+    let cy = y + h * 0.5;
+    let r = h * 0.30;
+    let t = h * 0.10;
+    list.quad([cx - r, cy - t / 2.0], [cx + r, cy - t / 2.0], [cx + r, cy + t / 2.0], [cx - r, cy + t / 2.0], c);
+    list.quad([cx - t / 2.0, cy - r], [cx + t / 2.0, cy - r], [cx + t / 2.0, cy + r], [cx - t / 2.0, cy + r], c);
+    list.quad([cx - r * 0.72, cy - t / 2.0], [cx - r * 0.45, cy - t / 2.0], [cx - r * 0.45, cy + t / 2.0], [cx - r * 0.72, cy + t / 2.0], c);
+    let _ = w;
+}
+
+fn draw_icon_power(x: f32, y: f32, w: f32, h: f32, list: &mut TriList, c: [u8; 4]) {
+    // Power symbol: circle stroke (4 side strips) + vertical bar.
+    let cx = x + w * 0.5;
+    let cy = y + h * 0.55;
+    let r = h * 0.26;
+    let t = h * 0.09;
+    list.quad([cx - r, cy - t / 2.0], [cx + r, cy - t / 2.0], [cx + r, cy + t / 2.0], [cx - r, cy + t / 2.0], c);
+    list.quad([cx - r, cy], [cx - r + t, cy], [cx - r + t, cy + r], [cx - r, cy + r], c);
+    list.quad([cx + r - t, cy], [cx + r, cy], [cx + r, cy + r], [cx + r - t, cy + r], c);
+    list.quad([cx - t / 2.0, cy - r * 1.25], [cx + t / 2.0, cy - r * 1.25], [cx + t / 2.0, cy + r * 0.4], [cx - t / 2.0, cy + r * 0.4], c);
+    let _ = w;
 }
 
 /// Sanitize a world name into a directory name.

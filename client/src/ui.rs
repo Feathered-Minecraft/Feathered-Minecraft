@@ -8,6 +8,13 @@
 use crate::font;
 use crate::overlay::TriList;
 
+/// Linearize an RGBA color for the renderer's sRGB targets: straight bytes
+/// in the overlay vertex are treated as linear on write, so authored UI
+/// colors must be sRGB-decoded first to land as designed.
+pub fn lin4(c: [u8; 4]) -> [u8; 4] {
+    crate::menu::lin_bytes(c)
+}
+
 /// A screen rect (x, y, w, h) in UI pixels.
 pub type Rect = [f32; 4];
 
@@ -48,9 +55,9 @@ pub fn button(
     let x = cx - w / 2.0;
     let r = [x, y, w, BUTTON_H];
     let (face, edge, text) = match state {
-        Hover::Hovered => ([70, 70, 78, 235], [190, 195, 210, 255], [255, 240, 160, 255]),
-        Hover::Idle => ([46, 46, 52, 225], [110, 112, 124, 255], [235, 235, 235, 255]),
-        Hover::Disabled => ([34, 34, 38, 190], [70, 70, 78, 160], [120, 120, 120, 190]),
+        Hover::Hovered => (lin4([70, 70, 78, 235]), lin4([190, 195, 210, 255]), lin4([255, 240, 160, 255])),
+        Hover::Idle => (lin4([46, 46, 52, 225]), lin4([110, 112, 124, 255]), lin4([235, 235, 235, 255])),
+        Hover::Disabled => (lin4([34, 34, 38, 190]), lin4([70, 70, 78, 160]), lin4([120, 120, 120, 190])),
     };
     // Face + border strips (crisp 2px, like the hotbar).
     list.quad([x, y], [x + w, y], [x + w, y + BUTTON_H], [x, y + BUTTON_H], face);
@@ -73,9 +80,9 @@ pub fn small_button(
 ) {
     let [x, y, w, h] = r;
     let (face, edge, text) = match state {
-        Hover::Hovered => ([70, 70, 78, 235], [190, 195, 210, 255], [255, 240, 160, 255]),
-        Hover::Idle => ([46, 46, 52, 225], [110, 112, 124, 255], [235, 235, 235, 255]),
-        Hover::Disabled => ([34, 34, 38, 190], [70, 70, 78, 160], [120, 120, 120, 190]),
+        Hover::Hovered => (lin4([70, 70, 78, 235]), lin4([190, 195, 210, 255]), lin4([255, 240, 160, 255])),
+        Hover::Idle => (lin4([46, 46, 52, 225]), lin4([110, 112, 124, 255]), lin4([235, 235, 235, 255])),
+        Hover::Disabled => (lin4([34, 34, 38, 190]), lin4([70, 70, 78, 160]), lin4([120, 120, 120, 190])),
     };
     list.quad([x, y], [x + w, y], [x + w, y + h], [x, y + h], face);
     list.quad([x, y], [x + w, y], [x + w, y + 2.0], [x, y + 2.0], edge);
@@ -135,7 +142,7 @@ pub fn slider_row(
 ) -> (Rect, Option<Rect>, Option<Rect>) {
     let [x, y, w, h] = r;
     let edge = match state {
-        Hover::Hovered => [190, 195, 210, 255],
+        Hover::Hovered => lin4([190, 195, 210, 255]),
         _ => [110, 112, 124, 255],
     };
     list.quad([x, y], [x + w, y], [x + w, y + h], [x, y + h], [30, 30, 36, 225]);

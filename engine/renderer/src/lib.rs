@@ -303,16 +303,19 @@ pub struct HudDraw {
 /// Client-side overlay vertex/list types, re-exported for the renderer's
 /// public API without a crate dependency cycle (the types are POD mirrors).
 pub mod client_overlay {
-    /// Mirrors feathered_client::overlay::HudVertex (24 bytes: 12 pos + 4
-    /// color + 8 px, no padding).
+    /// Mirrors feathered_client::overlay::HudVertex (32 bytes: 12 pos + 4
+    /// color + 8 UV-in-px + 8 reserved, no padding).
     #[repr(C)]
     #[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
     pub struct HudVertex {
         pub pos: [f32; 3],
         pub color: [u8; 4],
+        /// Screen pass: UV into the overlay texture (x < 0 = flat quad).
         pub px: [f32; 2],
+        /// Reserved (layout padding shared with the world-space pass).
+        pub uv: [f32; 2],
     }
-    const _: () = assert!(std::mem::size_of::<HudVertex>() == 24);
+    const _: () = assert!(std::mem::size_of::<HudVertex>() == 32);
 
     /// Mirrors feathered_client::overlay::TriList.
     #[derive(Debug, Default)]
@@ -330,6 +333,14 @@ struct OverlayState {
     screen_bind: wgpu::BindGroup,
     screen_pipeline: wgpu::RenderPipeline,
     screen_pipeline_capture: wgpu::RenderPipeline,
+    /// Overlay art texture (menu logo); None = 1×1 transparent fallback and
+    /// a bind group pointing at it (textured quads then draw nothing).
+    logo_tex: Option<wgpu::Texture>,
+    logo_view: wgpu::TextureView,
+    logo_sampler: wgpu::Sampler,
+    logo_bind: wgpu::BindGroup,
+    /// Texture bind group layout (reused when the logo is re-uploaded).
+    tex_bgl: wgpu::BindGroupLayout,
     /// Outline pass binds the shared globals (view_proj) + scene depth.
     outline_pipeline: wgpu::RenderPipeline,
     outline_pipeline_capture: wgpu::RenderPipeline,
@@ -384,12 +395,13 @@ pub fn upload_meshed(device: &wgpu::Device, mesh: &MeshedChunk) -> [Option<GpuCh
 
 impl OverlayState {
     const OVERLAY_VBUF_LAYOUT: wgpu::VertexBufferLayout<'static> = wgpu::VertexBufferLayout {
-        array_stride: 24,
+        array_stride: 32,
         step_mode: wgpu::VertexStepMode::Vertex,
         attributes: &[
             wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 0, shader_location: 0 },
             wgpu::VertexAttribute { format: wgpu::VertexFormat::Unorm8x4, offset: 12, shader_location: 1 },
             wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x2, offset: 16, shader_location: 2 },
+            wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x2, offset: 24, shader_location: 3 },
         ],
     };
 
@@ -436,14 +448,34 @@ impl OverlayState {
             }],
         });
 
-        let screen_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("overlay-screen-pl"),
-            bind_group_layouts: &[Some(&screen_params_bgl)],
-            immediate_size: 0,
+        // NOTE: the outline layout also carries the texture BGL — the shared
+        // fragment entry point statically references the texture even though
+        // outline vertices pass the flat-UV sentinel (naga requires the
+        // binding in the layout regardless of runtime branching).
+        let tex_bgl_early = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("overlay-tex-bgl"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
         });
         let outline_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("overlay-outline-pl"),
-            bind_group_layouts: &[Some(globals_bgl)],
+            bind_group_layouts: &[Some(globals_bgl), Some(&tex_bgl_early)],
             immediate_size: 0,
         });
 
@@ -492,20 +524,8 @@ impl OverlayState {
             bias: wgpu::DepthBiasState { constant: -1, slope_scale: -1.0, clamp: 0.0 },
         });
 
-        let screen_pipeline = mk_pipeline(
-            "overlay-screen",
-            &screen_pl,
-            "vs_screen",
-            surface_format,
-            None,
-        );
-        let screen_pipeline_capture = mk_pipeline(
-            "overlay-screen-capture",
-            &screen_pl,
-            "vs_screen",
-            capture_format,
-            None,
-        );
+        // Screen pipelines are built below with the texture bind group (the
+        // WGSL fragment declares group 0 binding 1/2 unconditionally).
         let outline_pipeline = mk_pipeline(
             "overlay-outline",
             &outline_pl,
@@ -541,11 +561,135 @@ impl OverlayState {
         };
         let (screen_vbuf, screen_ibuf) = mk_bufs("overlay-screen-buf");
         let (outline_vbuf, outline_ibuf) = mk_bufs("overlay-outline-buf");
+
+        // Overlay art texture: 1×1 transparent until `set_logo_texture`
+        // replaces it (flat quads are unaffected; textured quads then tint
+        // real texels). Linear sampling so downscaled art stays smooth.
+        let logo_view = device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("overlay-logo-fallback"),
+                size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            })
+            .create_view(&Default::default());
+        let logo_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("overlay-logo-sampler"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        let tex_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("overlay-tex-bgl"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        let logo_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("overlay-tex-bg"),
+            layout: &tex_bgl,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&logo_view) },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&logo_sampler) },
+            ],
+        });
+        // Rebuild the screen pipelines: their layout now includes the texture
+        // bind group (module is recompiled from the same WGSL source).
+        let screen_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("overlay-screen-tex"),
+            layout: Some(&device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("overlay-screen-tex-pl"),
+                bind_group_layouts: &[Some(&screen_params_bgl), Some(&tex_bgl)],
+                immediate_size: 0,
+            })),
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some("vs_screen"),
+                buffers: &[Some(Self::OVERLAY_VBUF_LAYOUT)],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("fs"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: surface_format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: Default::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+        let screen_pipeline_capture = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("overlay-screen-tex-capture"),
+            layout: Some(&device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("overlay-screen-tex-capture-pl"),
+                bind_group_layouts: &[Some(&screen_params_bgl), Some(&tex_bgl)],
+                immediate_size: 0,
+            })),
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some("vs_screen"),
+                buffers: &[Some(Self::OVERLAY_VBUF_LAYOUT)],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("fs"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: capture_format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: Default::default(),
+            multiview_mask: None,
+            cache: None,
+        });
         OverlayState {
             screen_params_buf,
             screen_bind,
             screen_pipeline,
             screen_pipeline_capture,
+            logo_tex: None,
+            logo_view,
+            logo_sampler,
+            logo_bind,
+            tex_bgl,
             outline_pipeline,
             outline_pipeline_capture,
             screen_vbuf,
@@ -577,7 +721,7 @@ impl OverlayState {
             let ni = (list.indices.len() * 2).max(Self::INITIAL_INDICES);
             *vbuf = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("overlay-vbuf"),
-                size: (nv * 24) as u64,
+                size: (nv * 32) as u64,
                 usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
@@ -687,6 +831,9 @@ pub struct Renderer {
     overlay: Option<OverlayState>,
     /// Pending overlay geometry for the next frame (set by `set_overlay`).
     pending_overlay: Option<HudDraw>,
+    /// Logo set before overlay init (rare: one-frame delay). Flushed when
+    /// the overlay state is created in `set_overlay`.
+    pending_logo: Option<(u32, u32, Vec<u8>)>,
 }
 
 /// Offscreen targets for the scene path (both legacy and staged share these;
@@ -1118,6 +1265,7 @@ impl Renderer {
         });
 
         Renderer {
+            pending_logo: None,
             device,
             queue,
             surface,
@@ -1916,6 +2064,7 @@ impl Renderer {
             });
             rpass.set_pipeline(pipe);
             rpass.set_bind_group(0, &self.globals_bind, &[]);
+            rpass.set_bind_group(1, &ov.logo_bind, &[]);
             rpass.set_vertex_buffer(0, ov.outline_vbuf.slice(..));
             rpass.set_index_buffer(ov.outline_ibuf.slice(..), wgpu::IndexFormat::Uint32);
             rpass.draw_indexed(0..ov.outline_count, 0, 0..1);
@@ -1938,6 +2087,7 @@ impl Renderer {
             });
             rpass.set_pipeline(pipe);
             rpass.set_bind_group(0, &ov.screen_bind, &[]);
+            rpass.set_bind_group(1, &ov.logo_bind, &[]);
             rpass.set_vertex_buffer(0, ov.screen_vbuf.slice(..));
             rpass.set_index_buffer(ov.screen_ibuf.slice(..), wgpu::IndexFormat::Uint32);
             rpass.draw_indexed(0..ov.screen_count, 0, 0..1);
@@ -2249,6 +2399,12 @@ impl Renderer {
         self.chunks.len()
     }
 
+    /// Is the overlay GPU state initialized (set_overlay called at least
+    /// once)? The client uses this to time one-shot uploads (logo art).
+    pub fn overlay_ready(&self) -> bool {
+        self.overlay.is_some()
+    }
+
     /// Queue the overlay geometry for the next frame (HUD + world-space
     /// outlines/particles). Empty lists simply draw nothing — passing an
     /// all-empty `HudDraw` every frame is valid (and hides the overlay).
@@ -2263,7 +2419,59 @@ impl Renderer {
                 &self.globals_bind,
             ));
         }
+        // Flush a logo that arrived before overlay init.
+        if let Some((w, h, rgba)) = self.pending_logo.take() {
+            Self::upload_logo(self.overlay.as_mut().unwrap(), &self.device, &self.queue, w, h, rgba);
+        }
         self.pending_overlay = Some(draw);
+    }
+
+    /// Set the overlay art texture (menu logo). RGBA8, straight alpha;
+    /// sized quads sample it in UI pixels. Replaces any previous texture.
+    pub fn set_logo_texture(&mut self, width: u32, height: u32, rgba: Vec<u8>) {
+        let Some(ov) = &mut self.overlay else {
+            // Overlay not initialized yet (no set_overlay this session):
+            // stash and flush when it comes up (one-frame delay at worst).
+            self.pending_logo = Some((width, height, rgba));
+            return;
+        };
+        Self::upload_logo(ov, &self.device, &self.queue, width, height, rgba);
+    }
+
+    fn upload_logo(
+        ov: &mut OverlayState,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        width: u32,
+        height: u32,
+        rgba: Vec<u8>,
+    ) {
+        let tex = device.create_texture_with_data(
+            queue,
+            &wgpu::TextureDescriptor {
+                label: Some("overlay-logo"),
+                size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            },
+            wgpu::util::TextureDataOrder::LayerMajor,
+            &rgba,
+        );
+        let view = tex.create_view(&Default::default());
+        ov.logo_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("overlay-tex-bg"),
+            layout: &ov.tex_bgl,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&view) },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&ov.logo_sampler) },
+            ],
+        });
+        ov.logo_view = view;
+        ov.logo_tex = Some(tex);
     }
 
     /// Change quality at runtime (also used by the F4 hotkey). Clears any

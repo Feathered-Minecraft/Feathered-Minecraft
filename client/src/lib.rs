@@ -762,6 +762,7 @@ fn convert_hud(lists: overlay::HudLists) -> feathered_renderer::HudDraw {
                     pos: v.pos,
                     color: v.color,
                     px: v.px,
+                    uv: v.uv,
                 })
                 .collect(),
             indices: l.indices,
@@ -795,11 +796,22 @@ fn apply_light_to_mesh(
 /// Launch the game (sandbox by default, `--scene validation` for Phase 1).
 pub fn run(opts: RunOptions) -> Result<(), Box<dyn std::error::Error>> {
     let event_loop = EventLoop::new()?;
+    let logo = std::fs::read("logo.png").ok().and_then(|bytes| {
+        image::load_from_memory(&bytes)
+            .ok()
+            .map(|img| img.to_rgba8())
+            .map(|rgba| {
+                let (w, h) = rgba.dimensions();
+                (w, h, rgba.into_raw(), w as f32 / h as f32)
+            })
+    });
     let app = App {
         state: None,
         opts,
         atlas: None,
         pending_world: None,
+        logo,
+        logo_applied: false,
     };
     event_loop.run_app(app)?;
     Ok(())
@@ -813,6 +825,10 @@ struct App {
     atlas: Option<std::sync::Arc<feathered_assets::atlas::Atlas>>,
     /// World chosen in the menu, started on the next event-loop pass.
     pending_world: Option<(PathBuf, u64)>,
+    /// Title-screen logo art (pixels + aspect), uploaded to the renderer
+    /// once the overlay initializes.
+    logo: Option<(u32, u32, Vec<u8>, f32)>,
+    logo_applied: bool,
 }
 
 impl ApplicationHandler for App {
@@ -935,8 +951,14 @@ impl ApplicationHandler for App {
                     _ => feathered_renderer::RenderQuality::Medium,
                 };
                 renderer.set_quality(quality);
+                // Sunset panorama behind the title (the mock's golden-hour
+                // sky; the menu wash keeps the left panel readable).
+                renderer.set_day_fraction(Some(0.08));
                 let profile = profile::ProfileStore::new(self.opts.worlds_dir.join("profile")).load();
-                let menu = menu::MenuState::new(&self.opts.worlds_dir, settings, profile);
+                let mut menu = menu::MenuState::new(&self.opts.worlds_dir, settings, profile);
+                // The title screen draws its own logo art (logo.png), and the
+                // backdrop is the live sky pinned to a sunset fraction.
+                menu.logo_art = self.logo.as_ref().map(|l| l.3);
                 let camera = feathered_renderer::Camera {
                     pos: [0.0, 80.0, 0.0],
                     yaw: 0.0,
@@ -1327,6 +1349,21 @@ impl ApplicationHandler for App {
                 state.start_world(dir, seed, &atlas);
                 if let Some(w) = &state.window {
                     w.set_title("Feathered — sandbox");
+                }
+            }
+        }
+
+        // Upload the title logo once the overlay state exists (set_overlay
+        // initializes it lazily; the first frame may miss the art).
+        if !self.logo_applied {
+            if state.renderer.as_ref().map(|r| r.overlay_ready()).unwrap_or(false) {
+                if let Some((w, h, rgba, _)) = &self.logo {
+                    if let Some(r) = &mut state.renderer {
+                        r.set_logo_texture(*w, *h, rgba.clone());
+                        self.logo_applied = true;
+                    }
+                } else {
+                    self.logo_applied = true;
                 }
             }
         }
