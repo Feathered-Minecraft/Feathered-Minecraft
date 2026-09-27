@@ -30,6 +30,7 @@ feathered-cache.bin
 # Generated sandbox worlds (player saves; user data, never committed)
 /world/
 /worlds/
+/worlds/
 
 # Binaries and debug symbols that escape the build directory
 *.exe

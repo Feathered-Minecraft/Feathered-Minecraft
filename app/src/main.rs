@@ -54,19 +54,24 @@ feathered packs list|import <path>|use <id>|uninstall <id>|open-folder|browse\n 
 feathered shaders list|import <path>|enable <id>|disable|uninstall <id>\n  \
 feathered compile-pack [--required] [--pack-dir <dir>] [--out <cache>]\n  \
 feathered validate [--pack-dir <dir>] [--cache <file>]\n  \
-feathered render [--pack-dir <dir>] [--cache <file>] [--screenshot <file>] [--quality low|medium|high|ultra]\n  \
-                 [--scene sandbox|validation] [--seed <u64>] [--view-distance <chunks>]\n  \
-                 [--sensitivity <mult>] [--day-length <seconds>] [--world <dir>]\n  \
-                 [--save-interval <seconds>] [--no-hud]\n\n\
+feathered render [--pack-dir <dir>] [--cache <file>] [--screenshot <file>] [--quality low|medium|high|ultra]\n\
+                 [--scene menu|sandbox|validation] [--seed <u64>] [--view-distance <chunks>]\n\
+                 [--sensitivity <mult>] [--day-length <seconds>] [--world <dir>]\n\
+                 [--worlds-dir <dir>] [--save-interval <seconds>] [--no-hud]\n\
+\n\
 Default pack dir: ./texture/assets   Default cache: ./target/feathered-cache.bin\n\
 Quality presets: low (half-res), medium (default), high (+post), ultra (max).\n\
 Sandbox: --seed (default 20260926), --view-distance (default 6, clamped 1..32),\n\
 --sensitivity (1.0 = default), --day-length (seconds; 0 = frozen sun).\n\
 --world <dir> loads/saves that world (default ./world): player edits, position\n\
 and time persist there atomically; autosave every --save-interval (default 30 s)\n\
-and on exit. Rebind keys via <world>/../controls.json (auto-generated).\n\
+and on exit. Rebind keys via <worlds-dir>/controls.json (auto-generated).\n\
 In game: F1 HUD, F3 debug screen, F4 quality, E mouse capture, Esc pause/quit.\n\
---scene validation runs the Phase-1 fly-camera scene (sandbox options ignored)."
+--scene menu (default) opens the title screen: singleplayer world list with\n\
+create/delete, a server list (connecting ships later), settings, and a profile\n\
+with name + skin changer supporting real Minecraft skin PNGs (64x64/64x32).\n\
+--scene sandbox skips the menu; --scene validation is the Phase-1 fly-camera\n\
+scene (sandbox options ignored)."
     );
 }
 
@@ -515,6 +520,9 @@ fn render(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     if let Some(s) = arg_value(args, "--world") {
         opts.world_dir = PathBuf::from(s);
     }
+    if let Some(s) = arg_value(args, "--worlds-dir") {
+        opts.worlds_dir = PathBuf::from(s);
+    }
     if let Some(s) = arg_value(args, "--save-interval") {
         opts.save_interval = s
             .parse::<f32>()
@@ -526,10 +534,14 @@ fn render(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     }
     if let Some(s) = arg_value(args, "--scene") {
         opts.scene = match s.to_ascii_lowercase().as_str() {
+            "menu" => feathered_client::SceneKind::Menu,
             "sandbox" => feathered_client::SceneKind::Sandbox,
             "validation" => feathered_client::SceneKind::Validation,
-            _ => return Err(format!("invalid --scene: {s} (sandbox|validation)").into()),
+            _ => return Err(format!("invalid --scene: {s} (menu|sandbox|validation)").into()),
         };
+    } else {
+        // The title screen is the normal entry point.
+        opts.scene = feathered_client::SceneKind::Menu;
     }
 
     feathered_client::run(opts)

@@ -20,8 +20,12 @@ pub mod font;
 pub mod input;
 pub mod interaction;
 pub mod inventory;
+pub mod menu;
 pub mod overlay;
+pub mod profile;
+pub mod settings;
 pub mod streaming;
+pub mod ui;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -57,6 +61,9 @@ pub struct RunOptions {
     pub view_distance: i32,
     /// Mouse sensitivity multiplier (default 1.0).
     pub sensitivity: f32,
+    /// Camera field of view in degrees (default 70; menu settings override
+    /// for menu-launched worlds).
+    pub fov: f32,
     /// `sandbox` (default) or `validation` (Phase-1 fly-camera scene).
     pub scene: SceneKind,
     /// Day length in seconds (0 = frozen sun at the shader config's angle).
@@ -73,10 +80,15 @@ pub struct RunOptions {
     pub save_interval: f32,
     /// Whether the HUD starts visible (F1 toggles at runtime).
     pub hud_default: bool,
+    /// Root directory containing world subdirectories + menus' settings
+    /// (default `./worlds`). `world_dir` remains the singleplayer override.
+    pub worlds_dir: PathBuf,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SceneKind {
+    /// Title screen → world select → play (the normal game flow).
+    Menu,
     Sandbox,
     Validation,
 }
@@ -93,6 +105,7 @@ impl Default for RunOptions {
             seed: 20260926,
             view_distance: 6,
             sensitivity: 1.0,
+            fov: 70.0,
             scene: SceneKind::Sandbox,
             day_length: daycycle::DEFAULT_DAY_SECONDS,
             world_dir: PathBuf::from("world"),
@@ -100,6 +113,7 @@ impl Default for RunOptions {
             shader_label: None,
             save_interval: 30.0,
             hud_default: true,
+            worlds_dir: PathBuf::from("worlds"),
         }
     }
 }
@@ -113,6 +127,11 @@ const CHUNK_JOBS_PER_FRAME: usize = 2;
 const TICKS_PER_SECOND: f32 = 20.0;
 
 enum GameMode {
+    /// Title/menus: no world loaded yet (sandbox state below is inert).
+    /// A chosen world queues on `App::pending_world` (not here) so menu
+    /// borrows never fight the app-level dispatch. Boxed: the menu state is
+    /// far larger than the other variants.
+    Menu { menu: Box<menu::MenuState> },
     /// Phase-1 validation scene (fly camera, fixed world). The world/mesh
     /// live on `AppState` (`mesh` is rendered every frame; `world` is only
     /// needed at setup).
@@ -183,6 +202,9 @@ struct AppState {
     shader_label: Option<String>,
     /// Autosave interval (seconds of gameplay; 0 = off; save on exit too).
     save_interval: f32,
+    /// Menu settings (fov/sensitivity/view/day/hud) applied to worlds
+    /// started from the menu; CLI flags override at construction.
+    settings: settings::Settings,
 }
 
 impl AppState {
@@ -495,6 +517,82 @@ impl AppState {
         }
     }
 
+    /// Transition Menu → Sandbox: build the streamer for `world_dir` (seed
+    /// from its save), restore the journal, and spawn the player. Mirrors the
+    /// setup done for `--scene sandbox` so both entry paths behave the same.
+    fn start_world(
+        &mut self,
+        world_dir: PathBuf,
+        fallback_seed: u64,
+        atlas: &feathered_assets::atlas::Atlas,
+    ) {
+        // Seed + journal come from the save the menu materialized.
+        let mut seed = fallback_seed;
+        let mut restore: Option<feathered_world::save::PlayerSave> = None;
+        let mut loaded_day: Option<Option<f32>> = None;
+        if feathered_world::save::exists(&world_dir) {
+            match feathered_world::save::load_from_dir(&world_dir) {
+                Ok(save) => {
+                    seed = save.meta.seed;
+                    restore = Some(save.meta.player);
+                    loaded_day = Some(save.meta.day_fraction);
+                    self.streamer.apply_save(&save);
+                    println!(
+                        "world: loaded {} edit(s) from {}",
+                        save.edits.len(),
+                        world_dir.display()
+                    );
+                }
+                Err(e) => eprintln!("world: save unreadable ({e}) — starting fresh"),
+            }
+        }
+        let view = self.settings.view_distance;
+        let uv_table = feathered_renderer::sprite_uv_table(&self.registry, atlas);
+        let (w, h) = (atlas.width, atlas.height);
+        self.streamer = streaming::Streamer::new(
+            seed,
+            view,
+            (w, h),
+            Box::new(move |sprite_id: u32| uv_table(sprite_id)),
+        );
+        // Spawn on the surface (or the saved position).
+        let spawn_h = self.streamer.spawn_height(&self.registry);
+        let spawn: [f32; 3] = match restore {
+            Some(p) => [p.pos[0] as f32, p.pos[1] as f32, p.pos[2] as f32],
+            None => [0.5, spawn_h + 0.01, 0.5],
+        };
+        let (yaw, pitch) = restore.map(|p| (p.yaw, p.pitch)).unwrap_or((0.0, 0.0));
+        self.controller = controller::PlayerController::new(spawn, self.settings.sensitivity);
+        self.camera = feathered_renderer::Camera {
+            pos: self.controller.body.eye(),
+            yaw,
+            pitch,
+            fov_y: self.settings.fov.to_radians(),
+            aspect: self.camera.aspect,
+            near: 0.1,
+            far: 400.0,
+        };
+        // Day clock per settings (a loaded save restores its fraction on top).
+        self.day = daycycle::DayCycle::new(self.settings.day_length);
+        if let Some(f) = loaded_day {
+            self.day.set_fraction(f);
+        }
+        self.hotbar = inventory::Inventory::new();
+        self.interact = interaction::Interaction::default();
+        self.particles.clear();
+        self.target = None;
+        self.break_progress = 0.0;
+        self.save_timer = 0.0;
+        self.fov_kick = 0.0;
+        self.paused = false;
+        self.hud_visible = self.settings.hud;
+        self.debug_visible = false;
+        self.mouse_held = [false, false];
+        self.last_center = ChunkPos::new(i32::MAX, i32::MAX); // forces first re-queue
+        self.world_dir = Some(world_dir);
+        self.mode = GameMode::Sandbox;
+    }
+
     /// Build the screen-space HUD draw list (crosshair, hotbar, progress,
     /// feedback line, debug screen). Pure authoring — the renderer uploads.
     fn build_hud(&self) -> feathered_renderer::HudDraw {
@@ -700,6 +798,8 @@ pub fn run(opts: RunOptions) -> Result<(), Box<dyn std::error::Error>> {
     let app = App {
         state: None,
         opts,
+        atlas: None,
+        pending_world: None,
     };
     event_loop.run_app(app)?;
     Ok(())
@@ -708,6 +808,11 @@ pub fn run(opts: RunOptions) -> Result<(), Box<dyn std::error::Error>> {
 struct App {
     state: Option<AppState>,
     opts: RunOptions,
+    /// Parsed texture atlas, kept for menu → world transitions (the
+    /// streamer needs sprite UVs when a world starts from the menu).
+    atlas: Option<std::sync::Arc<feathered_assets::atlas::Atlas>>,
+    /// World chosen in the menu, started on the next event-loop pass.
+    pending_world: Option<(PathBuf, u64)>,
 }
 
 impl ApplicationHandler for App {
@@ -731,7 +836,11 @@ impl ApplicationHandler for App {
         });
         let (_, payload) = feathered_assets::cache::decode(&blob).expect("cache decode");
         let registry = Registry::from_compiled(payload.pack);
-        let atlas = cached_to_atlas(&payload.atlas, registry.sprite_names());
+        let atlas = std::sync::Arc::new(cached_to_atlas(
+            &payload.atlas,
+            registry.sprite_names(),
+        ));
+        self.atlas = Some(atlas.clone());
 
         let size = window.surface_size();
         let renderer = pollster::block_on(feathered_renderer::Renderer::new(
@@ -744,8 +853,7 @@ impl ApplicationHandler for App {
                 quality: self.opts.quality,
                 shader_pack: self.opts.shader_pack.clone(),
             },
-        ));
-        let mut renderer = renderer;
+        ));                let mut renderer = renderer;
 
         // Shader-pack configuration bridge (unchanged from Phase 2).
         if let Some(pack_dir) = &self.opts.shader_config_path {
@@ -782,7 +890,7 @@ impl ApplicationHandler for App {
 
         // Controls: load the keymap (defaults + user overrides). A missing
         // file is written with the defaults so users have a template.
-        let controls_path = self.opts.world_dir.join("controls.json");
+        let controls_path = self.opts.worlds_dir.join("controls.json");
         let (controls, loaded) = controls::Controls::load(&controls_path);
         if !loaded {
             controls.save(&controls_path);
@@ -812,6 +920,35 @@ impl ApplicationHandler for App {
                 let controller =
                     controller::PlayerController::new([0.5, 60.0, 0.5], self.opts.sensitivity);
                 (GameMode::Validation, mesh, camera, controller, None)
+            }
+            SceneKind::Menu => {
+                // Menus first: streamer/controller stay inert defaults until
+                // a world is chosen (start_world rebuilds them for real).
+                // The menu scene follows settings.json (CLI --quality still
+                // wins for explicit --scene sandbox/validation launches).
+                let settings_path = settings::Settings::path_for(&self.opts.worlds_dir);
+                let (settings, _) = settings::Settings::load(&settings_path);
+                let quality = match settings.quality.as_str() {
+                    "Low" => feathered_renderer::RenderQuality::Low,
+                    "High" => feathered_renderer::RenderQuality::High,
+                    "Ultra" => feathered_renderer::RenderQuality::Ultra,
+                    _ => feathered_renderer::RenderQuality::Medium,
+                };
+                renderer.set_quality(quality);
+                let profile = profile::ProfileStore::new(self.opts.worlds_dir.join("profile")).load();
+                let menu = menu::MenuState::new(&self.opts.worlds_dir, settings, profile);
+                let camera = feathered_renderer::Camera {
+                    pos: [0.0, 80.0, 0.0],
+                    yaw: 0.0,
+                    pitch: 0.0,
+                    fov_y: 70.0_f32.to_radians(),
+                    aspect,
+                    near: 0.1,
+                    far: 400.0,
+                };
+                let controller =
+                    controller::PlayerController::new([0.0, 80.0, 0.0], self.opts.sensitivity);
+                (GameMode::Menu { menu: Box::new(menu) }, Default::default(), camera, controller, None)
             }
             SceneKind::Sandbox => {
                 // The streamer owns its world, generator and atlas table; the
@@ -933,6 +1070,21 @@ impl ApplicationHandler for App {
             pack_label: self.opts.pack_label.clone(),
             shader_label: self.opts.shader_label.clone(),
             save_interval: self.opts.save_interval,
+            settings: {
+                // Load once here (menus keep the same copy live); CLI flags
+                // override the saved values for direct sandbox launches.
+                let (mut s, _) = settings::Settings::load(&settings::Settings::path_for(
+                    &self.opts.worlds_dir,
+                ));
+                if self.opts.scene == SceneKind::Sandbox {
+                    s.sensitivity = self.opts.sensitivity;
+                    s.fov = self.opts.fov;
+                    s.view_distance = self.opts.view_distance;
+                    s.day_length = self.opts.day_length;
+                    s.hud = self.opts.hud_default;
+                }
+                s
+            },
         });
     }
 
@@ -973,6 +1125,39 @@ impl ApplicationHandler for App {
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 let pressed = event.state == ElementState::Pressed;
+                // Menu mode: keys drive the forms (Esc back, Enter submit,
+                // Backspace delete, printable chars type). No world hotkeys.
+                // Menu mode: keys drive the forms (Esc back, Enter submit,
+                // Backspace delete, printable chars type). No world hotkeys.
+                if matches!(state.mode, GameMode::Menu { .. }) {
+                    let mut menu_action = None;
+                    if let GameMode::Menu { menu } = &mut state.mode {
+                        if pressed {
+                            match event.physical_key {
+                                PhysicalKey::Code(KeyCode::Escape) => menu.escape(),
+                                PhysicalKey::Code(KeyCode::Enter)
+                                | PhysicalKey::Code(KeyCode::NumpadEnter) => {
+                                    menu_action = Some(menu.confirm(&self.opts.worlds_dir));
+                                }
+                                PhysicalKey::Code(KeyCode::Backspace) => menu.backspace(),
+                                _ => {}
+                            }
+                        }
+                        if let Some(text) = event.text.as_ref() {
+                            for ch in text.chars() {
+                                if !ch.is_control() {
+                                    menu.type_char(ch);
+                                }
+                            }
+                        }
+                    }
+                    if let Some(action) = menu_action {
+                        if let Some(p) = App::handle_menu_action(&self.opts, state, event_loop, action) {
+                            self.pending_world = Some(p);
+                        }
+                    }
+                    return;
+                }
                 if pressed {
                     // Actions resolved through the configurable keymap.
                     if let PhysicalKey::Code(code) = event.physical_key {
@@ -1040,6 +1225,10 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::PointerMoved { position, .. } => {
+                // Menus track the cursor for hover feedback (physical px).
+                if let GameMode::Menu { menu, .. } = &mut state.mode {
+                    menu.cursor = (position.x as f32, position.y as f32);
+                }
                 if state.mouse_captured {
                     if let Some(w) = &state.window {
                         let size = w.surface_size();
@@ -1060,6 +1249,24 @@ impl ApplicationHandler for App {
             }
             WindowEvent::PointerButton { state: btn_state, button, .. } => {
                 let pressed = btn_state == ElementState::Pressed;
+                // Menu clicks (physical px positions; draw hit-rects are in
+                // the same space since the menu authors at surface size).
+                let mut menu_action = None;
+                if pressed {
+                    if let GameMode::Menu { menu } = &mut state.mode {
+                        if let winit::event::ButtonSource::Mouse(mb) = button {
+                            if mb == MouseButton::Left {
+                                let p = (menu.cursor.0, menu.cursor.1);
+                                menu_action = Some(menu.click(p, &self.opts.worlds_dir));
+                            }
+                        }
+                    }
+                }
+                if let Some(action) = menu_action {
+                    if let Some(p) = App::handle_menu_action(&self.opts, state, event_loop, action) {
+                        self.pending_world = Some(p);
+                    }
+                }
                 if let winit::event::ButtonSource::Mouse(mb) = button {
                     match mb {
                         MouseButton::Left => state.mouse_held[0] = pressed,
@@ -1109,12 +1316,43 @@ impl ApplicationHandler for App {
             match &state.mode {
                 GameMode::Validation => state.validation_update(dt),
                 GameMode::Sandbox => state.sandbox_update(dt),
+                GameMode::Menu { .. } => {} // menus draw below, nothing to sim
+            }
+        }
+
+        // Menu → world transition: rebuild streaming around the chosen save.
+        let pending = self.pending_world.take();
+        if let Some((dir, seed)) = pending {
+            if let Some(atlas) = self.atlas.clone() {
+                state.start_world(dir, seed, &atlas);
+                if let Some(w) = &state.window {
+                    w.set_title("Feathered — sandbox");
+                }
             }
         }
 
         // HUD + world overlays (screen-space authoring is cheap; skip when
         // the HUD is fully hidden).
-        if state.hud_visible || state.debug_visible {
+        if let GameMode::Menu { menu, .. } = &mut state.mode {
+            let (w, h) = (
+                state
+                    .window
+                    .as_ref()
+                    .map(|w| w.surface_size().width as f32)
+                    .unwrap_or(1280.0),
+                state
+                    .window
+                    .as_ref()
+                    .map(|w| w.surface_size().height as f32)
+                    .unwrap_or(720.0),
+            );
+            let mut lists = overlay::HudLists::default();
+            menu.draw(&mut lists.screen, w, h);
+            let draw = convert_hud(lists);
+            if let Some(r) = &mut state.renderer {
+                r.set_overlay(draw);
+            }
+        } else if state.hud_visible || state.debug_visible {
             let hud = state.build_hud();
             if let Some(r) = &mut state.renderer {
                 r.set_overlay(hud);
@@ -1170,6 +1408,70 @@ impl ApplicationHandler for App {
 
     // NOTE: this winit beta exposes no `exiting` hook — save-on-exit happens
     // explicitly at each exit point (Esc quit below, CloseRequested above).
+}
+
+impl App {
+    /// Route a menu action: quits, live quality changes, delete
+    /// confirmations. Returns the world to start (queued by the caller on
+    /// `App::pending_world`, started next event-loop pass). An associated fn
+    /// (not a method): callers already hold `&mut self.state`.
+    fn handle_menu_action(
+        opts: &RunOptions,
+        state: &mut AppState,
+        event_loop: &dyn ActiveEventLoop,
+        action: menu::MenuAction,
+    ) -> Option<(PathBuf, u64)> {
+        match action {
+            menu::MenuAction::None => {}
+            menu::MenuAction::Quit => {
+                event_loop.exit();
+            }
+            menu::MenuAction::PlayWorld(dir) => {
+                let seed = feathered_world::save::load_from_dir(&dir)
+                    .map(|s| s.meta.seed)
+                    .map_err(|e| eprintln!("world: save unreadable ({e})"))
+                    .unwrap_or(opts.seed);
+                return Some((dir, seed));
+            }
+            menu::MenuAction::DeleteWorld(dir) => {
+                match std::fs::remove_dir_all(&dir) {
+                    Ok(_) => {
+                        eprintln!("world deleted: {}", dir.display());
+                    }
+                    Err(e) => {
+                        eprintln!("could not delete {}: {e}", dir.display());
+                        if let GameMode::Menu { menu, .. } = &mut state.mode {
+                            menu.toast = format!("Delete failed: {e}");
+                        }
+                        return None;
+                    }
+                }
+                if let GameMode::Menu { menu, .. } = &mut state.mode {
+                    menu.scan_worlds(&opts.worlds_dir);
+                    menu.world_sel = usize::MAX;
+                    menu.toast = "World deleted".into();
+                }
+            }
+            menu::MenuAction::JoinServer(_) => {
+                if let GameMode::Menu { menu, .. } = &mut state.mode {
+                    menu.toast = "Multiplayer is not implemented yet — servers save for later".into();
+                }
+            }
+            menu::MenuAction::QualityChanged(q) => {
+                if let Some(r) = &mut state.renderer {
+                    let quality = match q.as_str() {
+                        "Low" => feathered_renderer::RenderQuality::Low,
+                        "High" => feathered_renderer::RenderQuality::High,
+                        "Ultra" => feathered_renderer::RenderQuality::Ultra,
+                        _ => feathered_renderer::RenderQuality::Medium,
+                    };
+                    r.set_quality(quality);
+                }
+                state.settings.quality = q;
+            }
+        }
+        None
+    }
 }
 
 /// The ten-block validation scene (Phase 1 world — preserved verbatim).
