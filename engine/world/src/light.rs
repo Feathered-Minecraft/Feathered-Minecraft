@@ -133,36 +133,47 @@ pub fn compute_window(
     let blocks_light =
         |x: i64, y: i64, z: i64| -> bool { rules.blocks_light(x, y, z, world).unwrap_or(true) };
 
+    // Materialize the per-voxel "blocks light" table once before the BFS:
+    // the flood fill consults occlusion ~8× per voxel (column fill + up to
+    // six neighbor visits each), and the world-query path behind
+    // `blocks_light` is a hash lookup + div_euclid chunk resolution +
+    // registry occlusion classification. Flattening to a plain `Vec<bool>`
+    // read keeps results bit-identical while cutting the dominant cost of
+    // every chunk relight. Out-of-window probes never happen (both channels
+    // below only ever touch in-window cells).
+    let mut blocked = vec![true; len];
+    for z in z0..z1 {
+        for x in x0..x1 {
+            for y in y0..y1 {
+                blocked[idx(x, y, z)] = blocks_light(x, y, z);
+            }
+        }
+    }
+
     // --- Sky light: column fill from the top of the window, then BFS.
     let mut queue = VecDeque::new();
     for z in z0..z1 {
         for x in x0..x1 {
             let mut level = 15u8;
             for y in (y0..y1).rev() {
-                let blocked = blocks_light(x, y, z);
-                if blocked {
+                let i = idx(x, y, z);
+                if blocked[i] {
                     level = 0;
                 }
-                levels[idx(x, y, z)][0] = level;
+                levels[i][0] = level;
                 if level > 1 {
                     queue.push_back((x, y, z, level));
                 }
             }
         }
     }
-    bfs(
-        &mut levels,
-        &mut queue,
-        0,
-        &blocks_light,
-        &in_bounds,
-        &idx,
-        sx,
-        sy,
-        sz,
-    );
+    bfs(&mut levels, &mut queue, 0, &blocked, &in_bounds, &idx);
 
     // --- Block light: seed emitters, BFS.
+    // Emitter lookup memoized on the last-seen block id: the world is stone-
+    // dominated, so consecutive voxels overwhelmingly repeat one id and the
+    // uncached path re-ran name matching per voxel.
+    let mut emitter_memo: Option<(u32, u8)> = None;
     let mut queue = VecDeque::new();
     for y in y0..y1 {
         for z in z0..z1 {
@@ -173,38 +184,37 @@ pub fn compute_window(
                 if id == 0 {
                     continue;
                 }
-                let level = rules.emitter(id);
+                let level = match emitter_memo {
+                    Some((memo_id, memo_level)) if memo_id == id => memo_level,
+                    _ => {
+                        let level = rules.emitter(id);
+                        emitter_memo = Some((id, level));
+                        level
+                    }
+                };
                 if level == 0 {
                     continue;
                 }
                 // Emitters shine even when embedded (torches); seed them
                 // and all adjacent air so enclosed lanterns still glow.
-                levels[idx(x, y, z)][1] = level;
+                let i = idx(x, y, z);
+                levels[i][1] = level;
                 queue.push_back((x, y, z, level));
                 for (dx, dy, dz) in NEIGHBORS_6 {
                     let (nx, ny, nz) = (x + dx, y + dy, z + dz);
                     if !in_bounds(nx, ny, nz) {
                         continue;
                     }
-                    if levels[idx(nx, ny, nz)][1] < level - 1 {
-                        levels[idx(nx, ny, nz)][1] = level - 1;
+                    let ni = idx(nx, ny, nz);
+                    if levels[ni][1] < level - 1 {
+                        levels[ni][1] = level - 1;
                         queue.push_back((nx, ny, nz, level - 1));
                     }
                 }
             }
         }
     }
-    bfs(
-        &mut levels,
-        &mut queue,
-        1,
-        &blocks_light,
-        &in_bounds,
-        &idx,
-        sx,
-        sy,
-        sz,
-    );
+    bfs(&mut levels, &mut queue, 1, &blocked, &in_bounds, &idx);
 
     LightGrid {
         levels,
@@ -224,18 +234,16 @@ const NEIGHBORS_6: [(i64, i64, i64); 6] = [
 
 /// Shared BFS for both channels. Light spreads through non-light-blocking
 /// voxels, dropping 1 per step; solid voxels keep their seeded value only.
+/// Occlusion comes from the pre-materialized `blocked` table (see
+/// `compute_window`) — no world queries inside the flood fill.
 fn bfs(
     levels: &mut [LightLevels],
     queue: &mut VecDeque<(i64, i64, i64, u8)>,
     channel: usize,
-    blocks_light: &dyn Fn(i64, i64, i64) -> bool,
+    blocked: &[bool],
     in_bounds: &dyn Fn(i64, i64, i64) -> bool,
     idx: &dyn Fn(i64, i64, i64) -> usize,
-    sx: usize,
-    sy: usize,
-    sz: usize,
 ) {
-    let _ = (sx, sy, sz);
     while let Some((x, y, z, level)) = queue.pop_front() {
         let l = levels[idx(x, y, z)][channel];
         if l > level {
@@ -246,14 +254,14 @@ fn bfs(
             if !in_bounds(nx, ny, nz) {
                 continue;
             }
+            let ni = idx(nx, ny, nz);
             // Light never spreads INTO light-blocking voxels.
-            if blocks_light(nx, ny, nz) {
+            if blocked[ni] {
                 continue;
             }
             let next = level - 1;
-            let i = idx(nx, ny, nz);
-            if levels[i][channel] < next {
-                levels[i][channel] = next;
+            if levels[ni][channel] < next {
+                levels[ni][channel] = next;
                 queue.push_back((nx, ny, nz, next));
             }
         }
