@@ -1,0 +1,80 @@
+name: 🐛 Bug report
+description: Report something in Feathered that is broken, crashes, or renders wrongly.
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. Please fill in the details
+        below — the more precise the reproduction, the faster the fix.
+
+        **Security vulnerabilities must not be reported here.** See
+        [SECURITY.md](../../blob/main/SECURITY.md) for private reporting.
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: What did you expect to happen instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Exact commands and inputs, e.g. `feathered render --scene menu`, then what you clicked or pressed.
+      placeholder: |
+        1. Run `cargo run --release -- …`
+        2. Press …
+        3. Observe …
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - Renderer / graphics (wgpu)
+        - World generation / chunks / streaming
+        - Physics / player controller
+        - Entities / mobs / AI
+        - Resource or shader pack import
+        - Asset compiler / atlas
+        - UI / menus / input
+        - Save files / persistence
+        - CLI / first-run / pack management
+        - Build or toolchain issue
+        - Other / not sure
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: e.g. Windows 11 24H2, or Linux + distro
+    validations:
+      required: true
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU and driver
+      description: Relevant for any rendering issue.
+      placeholder: e.g. NVIDIA RTX 3060, driver 5xx.xx
+  - type: input
+    id: rust
+    attributes:
+      label: Rust toolchain version
+      description: Output of `rustc --version`.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and output
+      description: Console output, panic backtraces, or log files. Do not paste Minecraft assets or content you are not licensed to share.
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-flight checks
+      options:
+        - label: I searched existing issues for a duplicate.
+        - label: This is not a security vulnerability (see SECURITY.md).
+        - label: I built from a clean checkout of `main`.

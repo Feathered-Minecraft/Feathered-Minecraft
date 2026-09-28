@@ -121,6 +121,22 @@ Copyright © 2026 Feathered Minecraft Contributors.
 
 Licensed under the **GNU General Public License v3.0** — see [LICENSE](LICENSE).
 
+## Community
+
+Contributions are welcome. Please read the
+[contribution guide](CONTRIBUTING.md) first — it covers building, testing,
+code style, and the project's licensing and provenance rules (no Minecraft
+assets, no license-incompatible code). All participants are expected to
+follow the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+* 🐛 Report bugs with the [issue templates](.github/ISSUE_TEMPLATE/) and
+  propose changes through [pull requests](.github/pull_request_template.md)
+* 🔒 Report security vulnerabilities **privately** — see
+  [SECURITY.md](SECURITY.md); never as a public issue
+
+Feathered is an open-source project that stays GPL-3.0, ships no game
+assets, and collects no telemetry.
+
 ## Note about Minecraft assets
 
 This repository does not include, host, or download any Minecraft assets.

@@ -1,0 +1,57 @@
+name: ✨ Feature request
+description: Suggest a feature or improvement for Feathered.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Feature ideas are welcome — especially ones that fit Feathered's
+        direction: native performance on low-end hardware, a from-scratch
+        Rust/wgpu engine, no bundled or silently downloaded assets, and no
+        telemetry.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or motivation
+      description: What are you trying to do, and what stands in the way? "I want to … but …"
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What would you like to happen? Keep it about the outcome — implementation details can be discussed later.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches, including "just use an existing tool for this".
+  - type: dropdown
+    id: area
+    attributes:
+      label: Related area
+      options:
+        - Renderer / graphics (wgpu)
+        - World generation / chunks / streaming
+        - Physics / player controller
+        - Entities / mobs / AI
+        - Resource or shader pack import
+        - Asset compiler / atlas
+        - UI / menus / input
+        - Save files / persistence
+        - CLI / first-run / pack management
+        - Developer experience (build, tests, docs)
+        - Other
+    validations:
+      required: true
+  - type: checkboxes
+    id: fit
+    attributes:
+      label: Project fit
+      description: The maintainers weigh these heavily when triaging requests.
+      options:
+        - label: This does not require bundling, downloading, or redistributing Minecraft assets.
+        - label: This is consistent with a lightweight, low-end-friendly client.
+        - label: I searched existing issues and discussions for this idea.

@@ -1,0 +1,67 @@
+name: 📈 Performance report
+description: Report a performance regression or share measurements for the engine.
+labels: ["performance"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Feathered targets low-end hardware, so measurements matter. Please
+        benchmark **release builds** (`cargo build --release`) and report
+        the numbers you actually observed, not estimates.
+
+        If you are reporting a regression, include numbers from the last
+        commit you know was faster (the commit hash is enough).
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Report type
+      options:
+        - Regression — this used to be faster
+        - Bottleneck — this is slower than it should be
+        - Improvement — measurements from a change I made
+        - Question about performance
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: What did you measure?
+      options:
+        - Frame rate / frame time during gameplay
+        - Chunk generation or streaming
+        - Chunk meshing
+        - Asset pack compilation
+        - Entity / mob simulation
+        - Memory usage
+        - Startup time
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: method
+    attributes:
+      label: Measurement method
+      description: The exact command, scene, and how you measured (in-game counter, external profiler, timings from logs…).
+      placeholder: e.g. `cargo run --release -- render --scene …`, timed with …
+    validations:
+      required: true
+  - type: textarea
+    id: numbers
+    attributes:
+      label: Numbers
+      description: Table or list of measurements — FPS, ms/frame, chunks/s, memory, plus the view distance or scene used.
+    validations:
+      required: true
+  - type: textarea
+    id: hardware
+    attributes:
+      label: Hardware and environment
+      description: CPU, GPU + driver, RAM, OS. Low-end results are especially valuable.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      options:
+        - label: These are release-build measurements, not debug builds.
+        - label: I searched existing issues for a duplicate.

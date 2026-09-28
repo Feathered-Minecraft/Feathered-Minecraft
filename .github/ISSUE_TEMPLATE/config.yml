@@ -1,0 +1,10 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/Feathered-Minecraft/Feathered-Minecraft/security/advisories/new
+    about: >-
+      Report security issues privately — never as a public issue. If private
+      reporting is unavailable, use the e-mail address in SECURITY.md.
+  - name: Questions and usage help
+    url: https://github.com/Feathered-Minecraft/Feathered-Minecraft/discussions
+    about: Ask how to build, configure, or use Feathered before opening an issue.
