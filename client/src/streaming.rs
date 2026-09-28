@@ -423,9 +423,53 @@ impl Streamer {
         h as f32
     }
 
+    /// Synchronously load (but don't mesh) every chunk in a square radius
+    /// around `center`. Used by the title screen's panorama: the first ring
+    /// of terrain exists the moment the menu opens (no empty sky on frame
+    /// one) while `poll` still supplies the meshes over the next frames.
+    pub fn preload_around(&mut self, registry: &Registry, center: ChunkPos, radius: i32) {
+        let missing: Vec<ChunkPos> = (-radius..=radius)
+            .flat_map(|dz| (-radius..=radius).map(move |dx| ChunkPos::new(center.x + dx, center.z + dz)))
+            .filter(|p| !self.world.contains(*p))
+            .collect();
+        if missing.is_empty() {
+            return;
+        }
+        let gen = &self.generator;
+        let made: Vec<Chunk> = missing
+            .par_iter()
+            .map(|p| gen.generate_chunk(registry, *p))
+            .collect();
+        for mut c in made {
+            self.apply_edits_to_chunk(&mut c);
+            self.world.insert(c);
+        }
+    }
+
     /// The seed of this streamer's generator (debug screen).
     pub fn seed(&self) -> u64 {
         self.generator.seed_for_debug()
+    }
+
+    /// Surface height at an arbitrary column without loading anything:
+    /// loaded chunks answer from their data; unloaded columns fall back to
+    /// the generator's deterministic heightmap (the same value generation
+    /// would produce — no cross-system drift).
+    pub fn spawn_height_at(&mut self, registry: &Registry, x: i64, z: i64) -> i64 {
+        let pos = ChunkPos::of_block(x, z);
+        if let Some(chunk) = self.world.get_chunk(pos) {
+            let (bx, bz) = chunk.pos.min_block();
+            let (lx, lz) = ((x - bx) as u32, (z - bz) as u32);
+            for y in (0..feathered_world::grid::WORLD_H).rev() {
+                if let Some((b, _)) = chunk.get_local(lx, y, lz) {
+                    if b != 0 {
+                        return y as i64;
+                    }
+                }
+            }
+            return 0;
+        }
+        self.generator.height_at(x, z)
     }
 
     /// Access a block with edit-journal fallback: if the chunk is not

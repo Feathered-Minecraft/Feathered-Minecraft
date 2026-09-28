@@ -15,6 +15,7 @@
 
 pub mod controller;
 pub mod controls;
+pub mod entities_host;
 pub mod daycycle;
 pub mod font;
 pub mod input;
@@ -25,6 +26,7 @@ pub mod overlay;
 pub mod profile;
 pub mod settings;
 pub mod streaming;
+pub mod title;
 pub mod ui;
 
 use std::path::PathBuf;
@@ -126,6 +128,22 @@ const CHUNK_JOBS_PER_FRAME: usize = 2;
 /// Simulation tick rate driving `state.tick` (the renderer's anim clock).
 const TICKS_PER_SECOND: f32 = 20.0;
 
+/// Per-frame streaming time budget (seconds). Chunks load greedily up to
+/// this slice each frame — smooth movement across chunk borders instead of
+/// multi-frame hitches.
+const STREAM_BUDGET_SECS: f32 = 6.0 / 1000.0;
+
+/// Title-screen sun phase (fraction of a day; 0.08 = low golden-hour sun,
+/// matching the reference mock's sunset backdrop). Pinned via the
+/// renderer's sun-phase override while menus are up.
+const MENU_SUN_PHASE: f32 = 0.08;
+/// Title panorama drift: degrees per second the camera yaws while menus
+/// are up (a full circle every 3 minutes — slow enough to read as still,
+/// fast enough to notice).
+const MENU_PANORAMA_YAW_RATE: f32 = 2.0f32.to_radians();
+/// Title panorama eye height (blocks above the surface at spawn).
+const MENU_PANORAMA_EYE: f32 = 34.0;
+
 enum GameMode {
     /// Title/menus: no world loaded yet (sandbox state below is inert).
     /// A chosen world queues on `App::pending_world` (not here) so menu
@@ -205,6 +223,14 @@ struct AppState {
     /// Menu settings (fov/sensitivity/view/day/hud) applied to worlds
     /// started from the menu; CLI flags override at construction.
     settings: settings::Settings,
+    /// Entity world (mobs) — Phase 3 of the entity system.
+    entities: feathered_entity::EntityWorld,
+    /// Per-mob AI scratch (keyed by entity index) + goal selectors.
+    brains: std::collections::HashMap<u32, (feathered_entity::ai::GoalSelector, [f32; 4])>,
+    /// Mob spawner (deterministic, category-capped).
+    spawner: feathered_entity::spawn::Spawner,
+    /// Sim tick counter (AI parity + spawn cadence).
+    sim_tick: u64,
 }
 
 impl AppState {
@@ -226,10 +252,36 @@ impl AppState {
         self.target = interaction::current_target(eye, dir, &targetable);
     }
 
-    /// Run at most CHUNK_JOBS_PER_FRAME streaming jobs, uploading meshes and
-    /// baking each chunk's voxel light into its mesh before it hits the GPU.
+    /// Capture the cursor for mouse-look (grab + hide).
+    fn capture_cursor(&mut self) {
+        self.mouse_captured = true;
+        self.paused = false;
+        if let Some(w) = &self.window {
+            let _ = w.set_cursor_grab(winit::window::CursorGrabMode::Confined);
+            w.set_cursor_visible(false);
+        }
+    }
+
+    /// Release the cursor (grab off + visible). Simulation keeps running
+    /// unless the caller also sets `paused`.
+    fn release_cursor(&mut self) {
+        self.mouse_captured = false;
+        self.input.clear();
+        self.mouse_held = [false, false];
+        if let Some(w) = &self.window {
+            let _ = w.set_cursor_grab(winit::window::CursorGrabMode::None);
+            w.set_cursor_visible(true);
+        }
+    }
+
+    /// Run streaming jobs within a per-frame TIME budget (not a fixed job
+    /// count): one chunk job can cost 10ms+ (3×3 generation + mesh + light),
+    /// so a count budget hitched the frame every time the player crossed a
+    /// chunk border while walking. Jobs run until the budget is spent; the
+    /// job cap remains as a hard safety ceiling.
     fn pump_streaming(&mut self) {
         let center = self.stream_center();
+        let started = std::time::Instant::now();
         for _ in 0..CHUNK_JOBS_PER_FRAME {
             match self.streamer.poll(&self.registry, center) {
                 Some(streaming::ChunkJob::Load { pos, mut mesh, .. }) => {
@@ -247,6 +299,11 @@ impl AppState {
                     self.streamer.unload(pos);
                 }
                 None => break,
+            }
+            // Time budget: stop mid-loop when the frame's streaming slice is
+            // spent (checked after each completed job).
+            if started.elapsed().as_secs_f32() >= STREAM_BUDGET_SECS {
+                break;
             }
         }
     }
@@ -288,6 +345,33 @@ impl AppState {
         }
     }
 
+    /// Menu-mode per-frame work: stream the title panorama's terrain,
+    /// drift the camera, and sync hover → title selection. The streamer is
+    /// the inert default until the first world session built one — menus
+    /// render fine without it (empty world).
+    fn menu_update(&mut self, dt: f32) {
+        self.pump_streaming();
+        self.camera.yaw = (self.camera.yaw + MENU_PANORAMA_YAW_RATE * dt) % std::f32::consts::TAU;
+        // Hover selects (keyboard and mouse share one selection index);
+        // the stored layout matches what was drawn this frame.
+        if let GameMode::Menu { menu } = &mut self.mode {
+            if menu.screen == menu::Screen::Title {
+                let sel = menu.title_sel.min(2);
+                if let Some(l) = &menu.last_title_layout {
+                    for i in 0..l.rows.len() {
+                        let r = l.row_hit_rect(i, i == sel);
+                        if ui::hit(r, menu.cursor) {
+                            menu.title_sel = i;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+
+
     fn sandbox_update(&mut self, dt: f32) {
         // Streaming first (ground must exist before physics probes it).
         self.pump_streaming();
@@ -324,6 +408,36 @@ impl AppState {
         let mut cam = self.camera;
         self.controller.update(dt, &intent, &mut cam, &solid);
         self.camera = cam;
+
+        // Entities: spawn (budgeted, capped) → AI goals → physics. Inlined
+        // (not a helper method) so the mutable field borrows below stay
+        // disjoint from the `solid` closure's immutable registry/world
+        // captures — a `&mut self` method call would conflict with them.
+        let player_pos = self.controller.body.pos;
+        let player_chunk = ChunkPos::of_block(player_pos[0] as i64, player_pos[2] as i64);
+        let center = self.stream_center();
+        let view = self.settings.view_distance;
+        let daylight = self.day.elevation_sin();
+        // All closures capture disjoint field borrows (world / generator)
+        // — no whole-`self` borrow is held across the EntityHost call.
+        let loaded = |p: ChunkPos| self.streamer.world.contains(p);
+        let generator = &self.streamer.generator;
+        let surface_at = move |x: i64, z: i64| generator.height_at(x, z);
+        entities_host::EntityHost::update(
+            dt,
+            &mut self.sim_tick,
+            &mut self.entities,
+            &mut self.brains,
+            &mut self.spawner,
+            player_pos,
+            player_chunk,
+            daylight,
+            center,
+            &loaded,
+            &surface_at,
+            &solid,
+            view,
+        );
 
         // Sprint FOV feedback: ease the kick toward the desired value.
         let want_kick = if intent.sprint && intent.is_moving() {
@@ -530,16 +644,18 @@ impl AppState {
         let mut seed = fallback_seed;
         let mut restore: Option<feathered_world::save::PlayerSave> = None;
         let mut loaded_day: Option<Option<f32>> = None;
+        // Applied to the NEW streamer below (apply_save only fills the
+        // edit journal; the old/menu streamer is replaced in between).
+        let mut loaded_save: Option<feathered_world::save::WorldSave> = None;
         if feathered_world::save::exists(&world_dir) {
             match feathered_world::save::load_from_dir(&world_dir) {
                 Ok(save) => {
                     seed = save.meta.seed;
                     restore = Some(save.meta.player);
                     loaded_day = Some(save.meta.day_fraction);
-                    self.streamer.apply_save(&save);
+                    loaded_save = Some(save);
                     println!(
-                        "world: loaded {} edit(s) from {}",
-                        save.edits.len(),
+                        "world: loaded edit journal from {}",
                         world_dir.display()
                     );
                 }
@@ -555,6 +671,9 @@ impl AppState {
             (w, h),
             Box::new(move |sprite_id: u32| uv_table(sprite_id)),
         );
+        if let Some(save) = &loaded_save {
+            self.streamer.apply_save(save);
+        }
         // Spawn on the surface (or the saved position).
         let spawn_h = self.streamer.spawn_height(&self.registry);
         let spawn: [f32; 3] = match restore {
@@ -573,9 +692,17 @@ impl AppState {
             far: 400.0,
         };
         // Day clock per settings (a loaded save restores its fraction on top).
+        // Also release the title screen's pinned sun so gameplay follows the
+        // day cycle again.
         self.day = daycycle::DayCycle::new(self.settings.day_length);
         if let Some(f) = loaded_day {
             self.day.set_fraction(f);
+        }
+        if let Some(r) = &mut self.renderer {
+            r.set_sun_phase_override(None);
+            // Stale panorama meshes must never survive the transition; the
+            // new session's streamer re-uploads as it loads.
+            r.clear_chunks();
         }
         self.hotbar = inventory::Inventory::new();
         self.interact = interaction::Interaction::default();
@@ -591,6 +718,9 @@ impl AppState {
         self.last_center = ChunkPos::new(i32::MAX, i32::MAX); // forces first re-queue
         self.world_dir = Some(world_dir);
         self.mode = GameMode::Sandbox;
+        // Playable immediately: capture the cursor for mouse-look (Esc
+        // releases + pauses; E re-captures).
+        self.capture_cursor();
     }
 
     /// Build the screen-space HUD draw list (crosshair, hotbar, progress,
@@ -610,6 +740,9 @@ impl AppState {
                 .map(|w| w.surface_size().height as f32)
                 .unwrap_or(720.0),
         );
+
+        // Entity debug boxes (world-space overlay; Phase 6 renderer).
+        entities_host::EntityHost::render_debug(&self.entities, &mut draw.world);
 
         // Crosshair only when a target or aim makes sense (always in the
         // sandbox; the validation scene has no HUD by design).
@@ -665,6 +798,15 @@ impl AppState {
                     h / 2.0 - 60.0,
                     4.0,
                     [255, 220, 120, 240],
+                );
+                let hint = "CLICK OR PRESS E TO RESUME - ESC AGAIN QUITS";
+                font::draw_text_shadow(
+                    &mut draw.screen,
+                    hint,
+                    w / 2.0 - font::text_width(hint, 1.5) / 2.0,
+                    h / 2.0 - 20.0,
+                    1.5,
+                    [225, 225, 230, 230],
                 );
             }
         }
@@ -964,27 +1106,44 @@ impl ApplicationHandler for App {
                     _ => feathered_renderer::RenderQuality::Medium,
                 };
                 renderer.set_quality(quality);
-                // Sunset panorama behind the title (the mock's golden-hour
-                // sky; the menu wash keeps the left panel readable).
-                renderer.set_day_fraction(Some(0.08));
+                // Golden-hour panorama behind the title (the mock's sunset
+                // backdrop; the menu wash keeps the left panel readable).
+                // Absolute phase override: the menu pins the sun regardless
+                // of the day cycle / pack config; cleared when a world starts.
+                renderer.set_sun_phase_override(Some(MENU_SUN_PHASE));
+                let panorama_view = settings.view_distance.max(3);
                 let profile = profile::ProfileStore::new(self.opts.worlds_dir.join("profile")).load();
                 let mut menu = menu::MenuState::new(&self.opts.worlds_dir, settings, profile);
                 // The title screen draws its own logo art (logo.png) over
                 // the user-supplied background (background.png) + fade.
                 menu.logo_art = self.logo.as_ref().map(|l| l.3);
                 menu.background = self.background.is_some();
+                // Title panorama: stream real terrain around the spawn area
+                // (same generator the sandbox uses) and park the camera high
+                // above it for the mock's landscape backdrop. The first ring
+                // is generated synchronously so the title never opens on an
+                // empty sky; the rest streams in via menu_update.
+                let uv_table = feathered_renderer::sprite_uv_table(&registry, &atlas);
+                let mut streamer = streaming::Streamer::new(
+                    self.opts.seed,
+                    panorama_view,
+                    (atlas.width, atlas.height),
+                    Box::new(move |sprite_id: u32| uv_table(sprite_id)),
+                );
+                let eye_h = streamer.spawn_height(&registry) as f32 + MENU_PANORAMA_EYE;
+                streamer.preload_around(&registry, ChunkPos::new(0, 0), 3);
                 let camera = feathered_renderer::Camera {
-                    pos: [0.0, 80.0, 0.0],
+                    pos: [0.5, eye_h, 0.5],
                     yaw: 0.0,
-                    pitch: 0.0,
+                    pitch: -0.38,
                     fov_y: 70.0_f32.to_radians(),
                     aspect,
                     near: 0.1,
                     far: 400.0,
                 };
                 let controller =
-                    controller::PlayerController::new([0.0, 80.0, 0.0], self.opts.sensitivity);
-                (GameMode::Menu { menu: Box::new(menu) }, Default::default(), camera, controller, None)
+                    controller::PlayerController::new([0.5, eye_h, 0.5], self.opts.sensitivity);
+                (GameMode::Menu { menu: Box::new(menu) }, Default::default(), camera, controller, Some(streamer))
             }
             SceneKind::Sandbox => {
                 // The streamer owns its world, generator and atlas table; the
@@ -1121,6 +1280,10 @@ impl ApplicationHandler for App {
                 }
                 s
             },
+            entities: feathered_entity::EntityWorld::new(),
+            brains: std::collections::HashMap::new(),
+            spawner: feathered_entity::spawn::Spawner::new(self.opts.seed),
+            sim_tick: 0,
         });
     }
 
@@ -1168,15 +1331,34 @@ impl ApplicationHandler for App {
                 if matches!(state.mode, GameMode::Menu { .. }) {
                     let mut menu_action = None;
                     if let GameMode::Menu { menu } = &mut state.mode {
+                        let on_title = menu.screen == menu::Screen::Title;
                         if pressed {
                             match event.physical_key {
                                 PhysicalKey::Code(KeyCode::Escape) => menu.escape(),
                                 PhysicalKey::Code(KeyCode::Enter)
                                 | PhysicalKey::Code(KeyCode::NumpadEnter) => {
-                                    menu_action = Some(menu.confirm(&self.opts.worlds_dir));
+                                    if on_title {
+                                        // Title: Enter activates the selection.
+                                        menu_action = Some(menu.title_activate());
+                                    } else {
+                                        menu_action = Some(menu.confirm(&self.opts.worlds_dir));
+                                    }
                                 }
                                 PhysicalKey::Code(KeyCode::Backspace) => menu.backspace(),
                                 _ => {}
+                            }
+                            // Title-only nav keys (arrow up/down + Space).
+                            if on_title {
+                                match event.physical_key {
+                                    PhysicalKey::Code(KeyCode::ArrowDown)
+                                    | PhysicalKey::Code(KeyCode::KeyS) => menu.title_move(1),
+                                    PhysicalKey::Code(KeyCode::ArrowUp)
+                                    | PhysicalKey::Code(KeyCode::KeyW) => menu.title_move(-1),
+                                    PhysicalKey::Code(KeyCode::Space) => {
+                                        menu_action = Some(menu.title_activate());
+                                    }
+                                    _ => {}
+                                }
                             }
                         }
                         if let Some(text) = event.text.as_ref() {
@@ -1199,15 +1381,11 @@ impl ApplicationHandler for App {
                     if let PhysicalKey::Code(code) = event.physical_key {
                         match state.input.controls.action_of(code) {
                             Some(controls::Action::MouseCapture) => {
-                                state.mouse_captured = !state.mouse_captured;
-                                state.paused = false;
-                                if let Some(w) = &state.window {
-                                    let _ = w.set_cursor_grab(if state.mouse_captured {
-                                        winit::window::CursorGrabMode::Confined
-                                    } else {
-                                        winit::window::CursorGrabMode::None
-                                    });
-                                    w.set_cursor_visible(!state.mouse_captured);
+                                if state.mouse_captured {
+                                    state.release_cursor();
+                                    state.paused = true;
+                                } else {
+                                    state.capture_cursor();
                                 }
                             }
                             Some(controls::Action::CycleQuality) => {
@@ -1237,15 +1415,11 @@ impl ApplicationHandler for App {
                     }
                     match event.physical_key {
                         PhysicalKey::Code(KeyCode::Escape) => {
-                            // First Esc: release cursor + pause. Second Esc
-                            // (already paused/released): save + exit.
+                            // First Esc: release cursor + pause (PAUSED hint
+                            // on screen). Second Esc: save + exit.
                             if state.mouse_captured {
-                                state.mouse_captured = false;
+                                state.release_cursor();
                                 state.paused = true;
-                                if let Some(w) = &state.window {
-                                    let _ = w.set_cursor_grab(winit::window::CursorGrabMode::None);
-                                    w.set_cursor_visible(true);
-                                }
                             } else if state.paused {
                                 state.save_world();
                                 event_loop.exit();
@@ -1285,6 +1459,14 @@ impl ApplicationHandler for App {
             }
             WindowEvent::PointerButton { state: btn_state, button, .. } => {
                 let pressed = btn_state == ElementState::Pressed;
+                // Paused sandbox: any click resumes capture (standard FPS
+                // behavior; the PAUSED hint says so).
+                if pressed
+                    && !state.mouse_captured
+                    && matches!(state.mode, GameMode::Sandbox)
+                {
+                    state.capture_cursor();
+                }
                 // Menu clicks (physical px positions; draw hit-rects are in
                 // the same space since the menu authors at surface size).
                 let mut menu_action = None;
@@ -1304,10 +1486,17 @@ impl ApplicationHandler for App {
                     }
                 }
                 if let winit::event::ButtonSource::Mouse(mb) = button {
+                    // Break/place only while captured — clicking with the
+                    // cursor free (paused) must not punch blocks.
+                    let gate = state.mouse_captured;
                     match mb {
-                        MouseButton::Left => state.mouse_held[0] = pressed,
-                        MouseButton::Right => state.mouse_held[1] = pressed,
+                        MouseButton::Left => state.mouse_held[0] = pressed && gate,
+                        MouseButton::Right => state.mouse_held[1] = pressed && gate,
                         _ => {}
+                    }
+                    if gate && pressed && mb == MouseButton::Left && state.target.is_none() {
+                        // Clicked with capture but no block in reach: give a
+                        // subtle feedback beat via the crosshair feedback line.
                     }
                 }
             }
@@ -1352,7 +1541,7 @@ impl ApplicationHandler for App {
             match &state.mode {
                 GameMode::Validation => state.validation_update(dt),
                 GameMode::Sandbox => state.sandbox_update(dt),
-                GameMode::Menu { .. } => {} // menus draw below, nothing to sim
+                GameMode::Menu { .. } => state.menu_update(dt), // panorama backdrop
             }
         }
 
@@ -1509,6 +1698,14 @@ impl App {
                     menu.toast = "Multiplayer is not implemented yet — servers save for later".into();
                 }
             }
+            menu::MenuAction::OpenUrl(url) => {
+                // Safety gate: only the title footer's own URLs may open.
+                if menu::title::ALLOWED_URLS.contains(&url.as_str()) {
+                    open_external(&url);
+                } else {
+                    eprintln!("blocked non-whitelisted URL: {url}");
+                }
+            }
             menu::MenuAction::QualityChanged(q) => {
                 if let Some(r) = &mut state.renderer {
                     let quality = match q.as_str() {
@@ -1523,6 +1720,26 @@ impl App {
             }
         }
         None
+    }
+}
+
+/// Open a whitelisted external URL through the OS default handler.
+/// Cross-platform, no shell interpolation of the URL (argument array on
+/// Windows; direct exec elsewhere).
+fn open_external(url: &str) {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("cmd")
+            .args(["/c", "start", "", url])
+            .spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open").arg(url).spawn();
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let _ = std::process::Command::new("xdg-open").arg(url).spawn();
     }
 }
 
