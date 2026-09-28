@@ -47,15 +47,14 @@ impl Inventory {
             })
             .collect();
         slots.resize(27, Slot { block: None }); // reserve rows
-        Inventory {
-            slots,
-            selected: 0,
-        }
+        Inventory { slots, selected: 0 }
     }
 
     /// The block name in the selected hotbar slot.
     pub fn selected_block(&self) -> Option<&str> {
-        self.slots.get(self.selected).and_then(|s| s.block.as_deref())
+        self.slots
+            .get(self.selected)
+            .and_then(|s| s.block.as_deref())
     }
 
     /// Select a slot (0..9). Out-of-range is ignored.

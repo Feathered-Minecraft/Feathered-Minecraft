@@ -217,8 +217,7 @@ mod tests {
             }
         }
         assert!(
-            air_below_surface > 0
-                && air_below_surface < CHUNK_X as usize * CHUNK_Z as usize * 40,
+            air_below_surface > 0 && air_below_surface < CHUNK_X as usize * CHUNK_Z as usize * 40,
             "caves should carve some but not most of the underground ({air_below_surface})"
         );
     }
@@ -256,7 +255,10 @@ mod tests {
                 }
             }
         }
-        assert!(found, "no dipped column found across seeds/chunks — amplitude broken");
+        assert!(
+            found,
+            "no dipped column found across seeds/chunks — amplitude broken"
+        );
     }
 
     #[test]
@@ -265,7 +267,10 @@ mod tests {
         for x in -200..200 {
             for z in -50..50 {
                 let h = gen.height_at(x, z);
-                assert!(h >= 2 && h < WORLD_H as i64 - 24, "height {h} out of bounds");
+                assert!(
+                    h >= 2 && h < WORLD_H as i64 - 24,
+                    "height {h} out of bounds"
+                );
             }
         }
     }

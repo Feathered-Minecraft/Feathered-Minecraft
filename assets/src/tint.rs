@@ -52,7 +52,7 @@ impl TintSystem {
         };
         let Some(tex) = tex else {
             return match cm {
-                Colormap::Grass => TintColor([145, 189, 89]),   // plains fallback
+                Colormap::Grass => TintColor([145, 189, 89]), // plains fallback
                 Colormap::Foliage => TintColor([119, 171, 47]),
                 Colormap::DryFoliage => TintColor([169, 146, 82]),
             };
@@ -96,11 +96,7 @@ pub mod constants {
 fn _unused_witness(_: ()) {}
 
 /// Verify a sprite is actually grayscale (tint candidate) — validation helper.
-pub fn assert_tint_candidate(
-    store: &SpriteStore,
-    ns: &str,
-    name: &str,
-) -> AssetResult<bool> {
+pub fn assert_tint_candidate(store: &SpriteStore, ns: &str, name: &str) -> AssetResult<bool> {
     let sprite = store.get(ns, name).ok_or_else(|| AssetError {
         path: format!("{ns}:{name}"),
         message: "sprite not found".into(),

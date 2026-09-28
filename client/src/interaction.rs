@@ -66,11 +66,7 @@ pub fn current_target(
 /// * inside world height,
 /// * not intersecting the player box (expanded by a small epsilon),
 /// * (the caller checks the chunk is loaded and the slot non-empty).
-pub fn can_place_at(
-    pos: [i64; 3],
-    player_feet: [f32; 3],
-    world_h: u32,
-) -> bool {
+pub fn can_place_at(pos: [i64; 3], player_feet: [f32; 3], world_h: u32) -> bool {
     if pos[1] < 0 || pos[1] >= world_h as i64 {
         return false;
     }
@@ -88,9 +84,8 @@ pub fn can_place_at(
         ],
     );
     let eps = 1e-4;
-    let overlap = |pmin: f32, pmax: f32, bmin: f32, bmax: f32| {
-        pmin < bmax - eps && pmax > bmin + eps
-    };
+    let overlap =
+        |pmin: f32, pmax: f32, bmin: f32, bmax: f32| pmin < bmax - eps && pmax > bmin + eps;
     !(overlap(pmin[0], pmax[0], pos[0] as f32, pos[0] as f32 + 1.0)
         && overlap(pmin[1], pmax[1], pos[1] as f32, pos[1] as f32 + 1.0)
         && overlap(pmin[2], pmax[2], pos[2] as f32, pos[2] as f32 + 1.0))
@@ -124,7 +119,9 @@ impl Interaction {
 
     /// Break progress on the current target in 0..1 (for the HUD bar).
     pub fn progress(&self) -> f32 {
-        let Some((x, y, z)) = self.progress_at else { return 0.0 };
+        let Some((x, y, z)) = self.progress_at else {
+            return 0.0;
+        };
         // Progress ratio needs the target's hardness; store normalized when
         // accumulating — see `update_break`. Returns the stored value.
         let _ = (x, y, z);
@@ -216,7 +213,10 @@ impl Interaction {
         if self.place_cd > 0.0 || block.is_empty() {
             return None;
         }
-        let (nx, ny, nz) = target.hit.face.neighbor(target.hit.x, target.hit.y, target.hit.z);
+        let (nx, ny, nz) = target
+            .hit
+            .face
+            .neighbor(target.hit.x, target.hit.y, target.hit.z);
         if !can_place_at([nx, ny, nz], player_feet, world_h) {
             return None;
         }
@@ -241,11 +241,23 @@ mod tests {
     fn placement_into_the_player_is_rejected() {
         // Player standing at (0.5, 10, 0.5): box x 0.2..0.8, y 10..11.8.
         let feet = [0.5, 10.0, 0.5];
-        assert!(!can_place_at([0, 10, 0], feet, 128), "inside the player box");
-        assert!(!can_place_at([0, 11, 0], feet, 128), "overlaps the head area");
+        assert!(
+            !can_place_at([0, 10, 0], feet, 128),
+            "inside the player box"
+        );
+        assert!(
+            !can_place_at([0, 11, 0], feet, 128),
+            "overlaps the head area"
+        );
         assert!(can_place_at([2, 10, 2], feet, 128), "clearly away is fine");
-        assert!(can_place_at([0, 12, 0], feet, 128), "above the head is fine");
-        assert!(!can_place_at([0, 128, 0], feet, 128), "above world height rejected");
+        assert!(
+            can_place_at([0, 12, 0], feet, 128),
+            "above the head is fine"
+        );
+        assert!(
+            !can_place_at([0, 128, 0], feet, 128),
+            "above world height rejected"
+        );
         assert!(!can_place_at([0, -1, 0], feet, 128), "below world rejected");
     }
 
@@ -315,7 +327,10 @@ mod tests {
             },
         );
         assert_eq!(ev, Some(InteractionEvent::Placed(0, 10, 0)));
-        assert_eq!(placed_at, Some((0, 10, 0, registry.block_id("stone").unwrap(), 0)));
+        assert_eq!(
+            placed_at,
+            Some((0, 10, 0, registry.block_id("stone").unwrap(), 0))
+        );
         // Unknown block names are rejected cleanly.
         inter.tick(PLACE_COOLDOWN + 0.01);
         let ev2 = inter.try_place(
@@ -360,7 +375,10 @@ mod tests {
         assert_eq!(ev, Some(InteractionEvent::Broke(0, 9, 0)));
         assert_eq!(broke_at.get(), Some((0, 9, 0)));
         // ~1.1 s + one frame of slack.
-        assert!((frames as f32 / 60.0) < 1.3, "stone broke in {frames} frames");
+        assert!(
+            (frames as f32 / 60.0) < 1.3,
+            "stone broke in {frames} frames"
+        );
         // Progress resets after the break.
         assert_eq!(inter.progress(), 0.0);
         // Cooldown gates an immediate re-break.
@@ -382,15 +400,25 @@ mod tests {
             },
         };
         let block = Some(3u32); // dirt: 0.4 s
-        // Break half of block A.
+                                // Break half of block A.
         for _ in 0..10 {
-            inter.update_break(&mk_target(0), 1.0 / 60.0, &|_, _, _| block, &mut |_, _, _| true);
+            inter.update_break(
+                &mk_target(0),
+                1.0 / 60.0,
+                &|_, _, _| block,
+                &mut |_, _, _| true,
+            );
         }
         let half = inter.progress();
         assert!(half > 0.2 && half < 0.6, "mid-break progress, got {half}");
         // Switch to block B: progress restarts from zero there.
         for _ in 0..3 {
-            inter.update_break(&mk_target(5), 1.0 / 60.0, &|_, _, _| block, &mut |_, _, _| true);
+            inter.update_break(
+                &mk_target(5),
+                1.0 / 60.0,
+                &|_, _, _| block,
+                &mut |_, _, _| true,
+            );
         }
         assert!(inter.progress() < half, "switching targets resets progress");
         assert_eq!(inter.progress_target(), Some((5, 9, 0)));
@@ -412,13 +440,17 @@ mod tests {
         let block = Some(1u32);
         // do_break always vetoes (e.g. unbreakable bottom layer).
         for _ in 0..200 {
-            let ev = inter.update_break(&target, 1.0 / 60.0, &|_, _, _| block, &mut |_, _, _| false);
+            let ev =
+                inter.update_break(&target, 1.0 / 60.0, &|_, _, _| block, &mut |_, _, _| false);
             assert!(ev.is_none());
             if inter.progress_at.is_none() {
                 break; // progress was reset after a veto
             }
         }
-        assert_eq!(inter.progress_at, None, "veto resets and stops accumulation");
+        assert_eq!(
+            inter.progress_at, None,
+            "veto resets and stops accumulation"
+        );
     }
 
     #[test]

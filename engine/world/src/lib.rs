@@ -17,7 +17,8 @@ pub use light::LightGrid;
 pub use physics::PlayerBody;
 pub use terrain::TerrainGenerator;
 
-use feathered_assets::blockstates::{ModelInstance, Occlusion, Predicate};use feathered_assets::compiled::{CompiledAppearance, CompiledPack};
+use feathered_assets::blockstates::{ModelInstance, Occlusion, Predicate};
+use feathered_assets::compiled::{CompiledAppearance, CompiledPack};
 use feathered_assets::models::ModelId;
 
 /// Appearance as seen by the mesher: borrowed view over compiled data.
@@ -59,10 +60,7 @@ impl BlockDef {
                 .find(|(k, _)| k == prop)
                 .map(|(_, v)| v.clone())
                 .unwrap_or_else(|| values.first().cloned().unwrap_or_default());
-            let idx = values
-                .iter()
-                .position(|v| *v == chosen)
-                .unwrap_or(0) as u32;
+            let idx = values.iter().position(|v| *v == chosen).unwrap_or(0) as u32;
             id += idx * multiplier;
             multiplier *= values.len().max(1) as u32;
         }
@@ -130,7 +128,15 @@ impl Registry {
         let anims = pack
             .animations
             .iter()
-            .map(|a| (a.sprite.0, a.frametime, a.frames.clone(), a.strip_frames, a.interpolate))
+            .map(|a| {
+                (
+                    a.sprite.0,
+                    a.frametime,
+                    a.frames.clone(),
+                    a.strip_frames,
+                    a.interpolate,
+                )
+            })
             .collect();
         // `CompiledPack` must expose `vanilla_face_shade` for the test helper
         // below; nothing else from the pack is retained beyond what from_compiled
@@ -147,7 +153,9 @@ impl Registry {
 
     pub fn block(&self, name: &str) -> Option<&BlockDef> {
         // by_name stores 1-based ids; `blocks` is 0-indexed.
-        self.by_name.get(name).map(|&i| &self.blocks[(i - 1) as usize])
+        self.by_name
+            .get(name)
+            .map(|&i| &self.blocks[(i - 1) as usize])
     }
 
     pub fn block_id(&self, name: &str) -> Option<u32> {
@@ -169,7 +177,11 @@ impl Registry {
     /// First model of a block state (validation helper). For variant
     /// appearances this inspects the first variant entry (states differ only
     /// in model choice, not in structure).
-    pub fn model_of(&self, block: &str, state: u32) -> Option<&feathered_assets::compiled::RuntimeModel> {
+    pub fn model_of(
+        &self,
+        block: &str,
+        state: u32,
+    ) -> Option<&feathered_assets::compiled::RuntimeModel> {
         let b = self.block(block)?;
         let s = b.state(state)?;
         let mi = match &s.appearance {
@@ -191,7 +203,11 @@ impl Registry {
     }
 
     /// Sprite id by interned name (registry lookup, runtime-safe).
-    pub fn sprite_id_by_name(&self, ns: &str, name: &str) -> Option<feathered_assets::models::SpriteId> {
+    pub fn sprite_id_by_name(
+        &self,
+        ns: &str,
+        name: &str,
+    ) -> Option<feathered_assets::models::SpriteId> {
         self.sprite_names
             .iter()
             .position(|(n, p)| n == ns && p == name)
@@ -204,7 +220,11 @@ impl Registry {
             .iter()
             .find(|(sid, _, _, _, _)| *sid == sprite.0)
             .map(|(_, _, frames, strip_frames, _)| {
-                if frames.is_empty() { *strip_frames } else { frames.len() as u32 }
+                if frames.is_empty() {
+                    *strip_frames
+                } else {
+                    frames.len() as u32
+                }
             })
     }
 
@@ -227,7 +247,14 @@ impl Registry {
     #[doc(hidden)]
     pub fn from_names_for_tests(names: &[&str]) -> Registry {
         const TRANSPARENT: &[&str] = &[
-            "glass", "leaves", "water", "torch", "rail", "vine", "short_grass", "scaffolding",
+            "glass",
+            "leaves",
+            "water",
+            "torch",
+            "rail",
+            "vine",
+            "short_grass",
+            "scaffolding",
         ];
         let mut blocks = Vec::new();
         let mut by_name = std::collections::HashMap::new();

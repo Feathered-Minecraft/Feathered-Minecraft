@@ -30,8 +30,8 @@
 pub struct HudVertex {
     pub pos: [f32; 3], // z = 0 (screen) / unused (outline)
     pub color: [u8; 4],
-    pub px: [f32; 2],  // screen pass: UV (x < 0 = flat quad)
-    pub uv: [f32; 2],  // reserved
+    pub px: [f32; 2], // screen pass: UV (x < 0 = flat quad)
+    pub uv: [f32; 2], // reserved
 }
 
 const _: () = assert!(std::mem::size_of::<HudVertex>() == 32);
@@ -164,10 +164,10 @@ impl TriList {
         // carry x+1 so the fragment shader routes them to the bg slot.
         let ox = if background { 1.0 } else { 0.0 };
         let uvs = [
-            [ox, 1.0], // a: bottom-left
+            [ox, 1.0],       // a: bottom-left
             [1.0 + ox, 1.0], // b: bottom-right
             [1.0 + ox, 0.0], // c: top-right
-            [ox, 0.0], // d: top-left
+            [ox, 0.0],       // d: top-left
         ];
         for (p, uv) in [(a, uvs[0]), (b, uvs[1]), (c, uvs[2]), (d, uvs[3])] {
             self.vertices.push(HudVertex {
@@ -243,7 +243,13 @@ pub fn build_hotbar(list: &mut TriList, w: f32, h: f32, selected: usize) -> Vec<
             [110u8, 110, 110, 200]
         };
         // 4 border strips.
-        list.quad([sx, y0], [sx + SLOT, y0], [sx + SLOT, y0 + BORDER], [sx, y0 + BORDER], bc);
+        list.quad(
+            [sx, y0],
+            [sx + SLOT, y0],
+            [sx + SLOT, y0 + BORDER],
+            [sx, y0 + BORDER],
+            bc,
+        );
         list.quad(
             [sx, y0 + SLOT - BORDER],
             [sx + SLOT, y0 + SLOT - BORDER],
@@ -251,7 +257,13 @@ pub fn build_hotbar(list: &mut TriList, w: f32, h: f32, selected: usize) -> Vec<
             [sx, y0 + SLOT],
             bc,
         );
-        list.quad([sx, y0], [sx + BORDER, y0], [sx + BORDER, y0 + SLOT], [sx, y0 + SLOT], bc);
+        list.quad(
+            [sx, y0],
+            [sx + BORDER, y0],
+            [sx + BORDER, y0 + SLOT],
+            [sx, y0 + SLOT],
+            bc,
+        );
         list.quad(
             [sx + SLOT - BORDER, y0],
             [sx + SLOT, y0],
@@ -275,7 +287,7 @@ pub fn build_progress(list: &mut TriList, w: f32, h: f32, progress: f32) {
     let bh = 8.0f32;
     let x0 = (w - bw) / 2.0;
     let y0 = h / 2.0 + 26.0; // just below the crosshair
-    // Track.
+                             // Track.
     list.quad(
         [x0 - 1.0, y0 - 1.0],
         [x0 + bw + 1.0, y0 - 1.0],
@@ -283,11 +295,23 @@ pub fn build_progress(list: &mut TriList, w: f32, h: f32, progress: f32) {
         [x0 - 1.0, y0 + bh + 1.0],
         [0, 0, 0, 140],
     );
-    list.quad([x0, y0], [x0 + bw, y0], [x0 + bw, y0 + bh], [x0, y0 + bh], [30, 30, 30, 190]);
+    list.quad(
+        [x0, y0],
+        [x0 + bw, y0],
+        [x0 + bw, y0 + bh],
+        [x0, y0 + bh],
+        [30, 30, 30, 190],
+    );
     // Fill.
     let fw = bw * progress.clamp(0.0, 1.0);
     let shade = (60.0 + 160.0 * progress) as u8;
-    list.quad([x0, y0], [x0 + fw, y0], [x0 + fw, y0 + bh], [x0, y0 + bh], [shade, shade, shade, 220]);
+    list.quad(
+        [x0, y0],
+        [x0 + fw, y0],
+        [x0 + fw, y0 + bh],
+        [x0, y0 + bh],
+        [shade, shade, shade, 220],
+    );
 }
 
 /// A small positioned text run (already-layouted; see `layout_text`).
@@ -322,40 +346,117 @@ pub fn centered_text(s: &str, rect: [f32; 4], scale: f32) -> Vec<(char, [f32; 2]
 /// rectangular beam (4 thin quads) so the outline has real thickness and
 /// reads correctly from any viewing angle while staying depth-tested
 /// against the world.
-pub fn build_block_outline(list: &mut TriList, x: i64, y: i64, z: i64, expand: f32, color: [u8; 4]) {
+pub fn build_block_outline(
+    list: &mut TriList,
+    x: i64,
+    y: i64,
+    z: i64,
+    expand: f32,
+    color: [u8; 4],
+) {
     let (x0, y0, z0) = (x as f32 - expand, y as f32 - expand, z as f32 - expand);
-    let (x1, y1, z1) = (x as f32 + 1.0 + expand, y as f32 + 1.0 + expand, z as f32 + 1.0 + expand);
+    let (x1, y1, z1) = (
+        x as f32 + 1.0 + expand,
+        y as f32 + 1.0 + expand,
+        z as f32 + 1.0 + expand,
+    );
     let t = expand * 2.0; // beam half-thickness around the edge line
 
     // One axis-aligned beam from a to b: 4 quads forming a hollow tube of
     // half-thickness `t` around the segment. Exactly one axis differs.
-    fn beam(
-        list: &mut TriList,
-        a: (f32, f32, f32),
-        b: (f32, f32, f32),
-        t: f32,
-        color: [u8; 4],
-    ) {
+    fn beam(list: &mut TriList, a: (f32, f32, f32), b: (f32, f32, f32), t: f32, color: [u8; 4]) {
         let (ax, ay, az) = a;
         let (bx, by, bz) = b;
         if ax != bx {
             // Along X: cross-section in YZ.
-            list.quad3([ax, ay - t, az - t], [bx, ay - t, az - t], [bx, ay - t, az + t], [ax, ay - t, az + t], color);
-            list.quad3([ax, ay + t, az - t], [bx, ay + t, az - t], [bx, ay + t, az + t], [ax, ay + t, az + t], color);
-            list.quad3([ax, ay - t, az - t], [bx, ay - t, az - t], [bx, ay + t, az - t], [ax, ay + t, az - t], color);
-            list.quad3([ax, ay - t, az + t], [bx, ay - t, az + t], [bx, ay + t, az + t], [ax, ay + t, az + t], color);
+            list.quad3(
+                [ax, ay - t, az - t],
+                [bx, ay - t, az - t],
+                [bx, ay - t, az + t],
+                [ax, ay - t, az + t],
+                color,
+            );
+            list.quad3(
+                [ax, ay + t, az - t],
+                [bx, ay + t, az - t],
+                [bx, ay + t, az + t],
+                [ax, ay + t, az + t],
+                color,
+            );
+            list.quad3(
+                [ax, ay - t, az - t],
+                [bx, ay - t, az - t],
+                [bx, ay + t, az - t],
+                [ax, ay + t, az - t],
+                color,
+            );
+            list.quad3(
+                [ax, ay - t, az + t],
+                [bx, ay - t, az + t],
+                [bx, ay + t, az + t],
+                [ax, ay + t, az + t],
+                color,
+            );
         } else if ay != by {
             // Along Y: cross-section in XZ.
-            list.quad3([ax - t, ay, az - t], [bx + t, ay, az - t], [bx + t, by, az - t], [ax - t, by, az - t], color);
-            list.quad3([ax - t, ay, az + t], [bx + t, ay, az + t], [bx + t, by, az + t], [ax - t, by, az + t], color);
-            list.quad3([ax - t, ay, az - t], [ax - t, ay, az + t], [ax - t, by, az + t], [ax - t, by, az - t], color);
-            list.quad3([bx + t, ay, az - t], [bx + t, ay, az + t], [bx + t, by, az + t], [bx + t, by, az - t], color);
+            list.quad3(
+                [ax - t, ay, az - t],
+                [bx + t, ay, az - t],
+                [bx + t, by, az - t],
+                [ax - t, by, az - t],
+                color,
+            );
+            list.quad3(
+                [ax - t, ay, az + t],
+                [bx + t, ay, az + t],
+                [bx + t, by, az + t],
+                [ax - t, by, az + t],
+                color,
+            );
+            list.quad3(
+                [ax - t, ay, az - t],
+                [ax - t, ay, az + t],
+                [ax - t, by, az + t],
+                [ax - t, by, az - t],
+                color,
+            );
+            list.quad3(
+                [bx + t, ay, az - t],
+                [bx + t, ay, az + t],
+                [bx + t, by, az + t],
+                [bx + t, by, az - t],
+                color,
+            );
         } else {
             // Along Z: cross-section in XY.
-            list.quad3([ax - t, ay - t, az], [bx + t, ay - t, az], [bx + t, ay - t, bz], [ax - t, ay - t, bz], color);
-            list.quad3([ax - t, ay + t, az], [bx + t, ay + t, az], [bx + t, ay + t, bz], [ax - t, ay + t, bz], color);
-            list.quad3([ax - t, ay - t, az], [ax - t, ay + t, az], [ax - t, ay + t, bz], [ax - t, ay - t, bz], color);
-            list.quad3([bx + t, ay - t, az], [bx + t, ay + t, az], [bx + t, ay + t, bz], [bx + t, ay - t, bz], color);
+            list.quad3(
+                [ax - t, ay - t, az],
+                [bx + t, ay - t, az],
+                [bx + t, ay - t, bz],
+                [ax - t, ay - t, bz],
+                color,
+            );
+            list.quad3(
+                [ax - t, ay + t, az],
+                [bx + t, ay + t, az],
+                [bx + t, ay + t, bz],
+                [ax - t, ay + t, bz],
+                color,
+            );
+            list.quad3(
+                [ax - t, ay - t, az],
+                [ax - t, ay + t, az],
+                [ax - t, ay + t, bz],
+                [ax - t, ay - t, bz],
+                color,
+            );
+            list.quad3(
+                [bx + t, ay - t, az],
+                [bx + t, ay + t, az],
+                [bx + t, ay + t, bz],
+                [bx + t, ay - t, bz],
+                color,
+            );
         }
     }
 
@@ -377,14 +478,7 @@ pub fn build_block_outline(list: &mut TriList, x: i64, y: i64, z: i64, expand: f
 impl TriList {
     /// World-space quad (3D positions) — used by the outline builder and
     /// the menu's skyline panorama (flat-UV sentinel, color-shaded).
-    pub fn quad3(
-        &mut self,
-        a: [f32; 3],
-        b: [f32; 3],
-        c: [f32; 3],
-        d: [f32; 3],
-        color: [u8; 4],
-    ) {
+    pub fn quad3(&mut self, a: [f32; 3], b: [f32; 3], c: [f32; 3], d: [f32; 3], color: [u8; 4]) {
         let base = self.vertices.len() as u32;
         for p in [a, b, c, d] {
             self.vertices.push(HudVertex {
@@ -406,20 +500,92 @@ pub fn beam3(list: &mut TriList, a: [f32; 3], b: [f32; 3], t: f32, color: [u8; 4
     let (ax, ay, az) = (a[0], a[1], a[2]);
     let (bx, by, bz) = (b[0], b[1], b[2]);
     if ax != bx {
-        list.quad3([ax, ay - t, az - t], [bx, ay - t, az - t], [bx, ay - t, az + t], [ax, ay - t, az + t], color);
-        list.quad3([ax, ay + t, az - t], [bx, ay + t, az - t], [bx, ay + t, az + t], [ax, ay + t, az + t], color);
-        list.quad3([ax, ay - t, az - t], [bx, ay - t, az - t], [bx, ay + t, az - t], [ax, ay + t, az - t], color);
-        list.quad3([ax, ay - t, az + t], [bx, ay - t, az + t], [bx, ay + t, az + t], [ax, ay + t, az + t], color);
+        list.quad3(
+            [ax, ay - t, az - t],
+            [bx, ay - t, az - t],
+            [bx, ay - t, az + t],
+            [ax, ay - t, az + t],
+            color,
+        );
+        list.quad3(
+            [ax, ay + t, az - t],
+            [bx, ay + t, az - t],
+            [bx, ay + t, az + t],
+            [ax, ay + t, az + t],
+            color,
+        );
+        list.quad3(
+            [ax, ay - t, az - t],
+            [bx, ay - t, az - t],
+            [bx, ay + t, az - t],
+            [ax, ay + t, az - t],
+            color,
+        );
+        list.quad3(
+            [ax, ay - t, az + t],
+            [bx, ay - t, az + t],
+            [bx, ay + t, az + t],
+            [ax, ay + t, az + t],
+            color,
+        );
     } else if ay != by {
-        list.quad3([ax - t, ay, az - t], [bx + t, ay, az - t], [bx + t, by, az - t], [ax - t, by, az - t], color);
-        list.quad3([ax - t, ay, az + t], [bx + t, ay, az + t], [bx + t, by, az + t], [ax - t, by, az + t], color);
-        list.quad3([ax - t, ay, az - t], [ax - t, ay, az + t], [ax - t, by, az + t], [ax - t, by, az - t], color);
-        list.quad3([bx + t, ay, az - t], [bx + t, ay, az + t], [bx + t, by, az + t], [bx + t, by, az - t], color);
+        list.quad3(
+            [ax - t, ay, az - t],
+            [bx + t, ay, az - t],
+            [bx + t, by, az - t],
+            [ax - t, by, az - t],
+            color,
+        );
+        list.quad3(
+            [ax - t, ay, az + t],
+            [bx + t, ay, az + t],
+            [bx + t, by, az + t],
+            [ax - t, by, az + t],
+            color,
+        );
+        list.quad3(
+            [ax - t, ay, az - t],
+            [ax - t, ay, az + t],
+            [ax - t, by, az + t],
+            [ax - t, by, az - t],
+            color,
+        );
+        list.quad3(
+            [bx + t, ay, az - t],
+            [bx + t, ay, az + t],
+            [bx + t, by, az + t],
+            [bx + t, by, az - t],
+            color,
+        );
     } else {
-        list.quad3([ax - t, ay - t, az], [bx + t, ay - t, az], [bx + t, ay - t, bz], [ax - t, ay - t, bz], color);
-        list.quad3([ax - t, ay + t, az], [bx + t, ay + t, az], [bx + t, ay + t, bz], [ax - t, ay + t, bz], color);
-        list.quad3([ax - t, ay - t, az], [ax - t, ay + t, az], [ax - t, ay + t, bz], [ax - t, ay - t, bz], color);
-        list.quad3([bx + t, ay - t, az], [bx + t, ay + t, az], [bx + t, ay + t, bz], [bx + t, ay - t, bz], color);
+        list.quad3(
+            [ax - t, ay - t, az],
+            [bx + t, ay - t, az],
+            [bx + t, ay - t, bz],
+            [ax - t, ay - t, bz],
+            color,
+        );
+        list.quad3(
+            [ax - t, ay + t, az],
+            [bx + t, ay + t, az],
+            [bx + t, ay + t, bz],
+            [ax - t, ay + t, bz],
+            color,
+        );
+        list.quad3(
+            [ax - t, ay - t, az],
+            [ax - t, ay + t, az],
+            [ax - t, ay + t, bz],
+            [ax - t, ay - t, bz],
+            color,
+        );
+        list.quad3(
+            [bx + t, ay - t, az],
+            [bx + t, ay + t, az],
+            [bx + t, ay + t, bz],
+            [bx + t, ay - t, bz],
+            color,
+        );
     }
 }
 
@@ -463,7 +629,11 @@ pub fn spawn_burst(out: &mut Vec<Particle>, x: i64, y: i64, z: i64, color: [u8; 
         ];
         let speed = 1.5 + ((h >> 24) & 0xFF) as f32 / 255.0 * 1.5;
         out.push(Particle {
-            pos: [x as f32 + 0.5 + dir[0] * 0.3, y as f32 + 0.5, z as f32 + 0.5 + dir[2] * 0.3],
+            pos: [
+                x as f32 + 0.5 + dir[0] * 0.3,
+                y as f32 + 0.5,
+                z as f32 + 0.5 + dir[2] * 0.3,
+            ],
             vel: [dir[0] * speed, dir[1] * speed + 1.0, dir[2] * speed],
             life: 0.0,
             ttl: 0.55 + ((h >> 32) & 0xFF) as f32 / 255.0 * 0.25,
@@ -594,12 +764,13 @@ mod tests {
         assert!(!a.is_empty() && !b.is_empty());
         // Fill width grows with progress. The fill quads are the only ones
         // drawn with alpha 220 (track 190, outline 140).
-        let fill_max_x = |l: &TriList| l
-            .vertices
-            .iter()
-            .filter(|v| v.color[3] == 220)
-            .map(|v| v.pos[0])
-            .fold(0.0f32, f32::max);
+        let fill_max_x = |l: &TriList| {
+            l.vertices
+                .iter()
+                .filter(|v| v.color[3] == 220)
+                .map(|v| v.pos[0])
+                .fold(0.0f32, f32::max)
+        };
         assert!(fill_max_x(&b) > fill_max_x(&a), "fill grows with progress");
     }
 

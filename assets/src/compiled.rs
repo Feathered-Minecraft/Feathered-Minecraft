@@ -5,8 +5,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::models::{Direction, FaceQuad, GuiLight, SpriteId};
 use crate::blockstates::{Occlusion, Predicate};
+use crate::models::{Direction, FaceQuad, GuiLight, SpriteId};
 
 /// A compiled model in the runtime table (index = ModelId).
 #[derive(Debug, Clone, Serialize, Deserialize)]

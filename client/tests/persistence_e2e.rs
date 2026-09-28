@@ -47,11 +47,11 @@ fn full_persistence_scenario() {
     // Edits near the spawn, at a chunk border (15/16 and local 0), and in
     // negative chunks — the geometry cases that break persistence.
     let edits = [
-        (2i64, 80, 3i64, stone),      // high tower inside chunk 0,0
-        (15, 70, 15, dirt),           // corner of chunk 0,0 (border)
-        (16, 75, 16, stone),          // inside chunk 1,1
-        (-1, 65, -1, stone),          // corner of chunk -1,-1 (negative)
-        (-16, 60, -16, dirt),         // min-corner of chunk -1,-1
+        (2i64, 80, 3i64, stone), // high tower inside chunk 0,0
+        (15, 70, 15, dirt),      // corner of chunk 0,0 (border)
+        (16, 75, 16, stone),     // inside chunk 1,1
+        (-1, 65, -1, stone),     // corner of chunk -1,-1 (negative)
+        (-16, 60, -16, dirt),    // min-corner of chunk -1,-1
         (0, 50, 0, stone),
     ];
     for &(x, y, z, b) in &edits {
@@ -153,7 +153,11 @@ fn save_survives_an_interruption_leftover_tmp() {
     s.record_edit(1, 90, 1, stone, 0);
     let meta = WorldMeta {
         seed: SEED,
-        player: PlayerSave { pos: [0.0; 3], yaw: 0.0, pitch: 0.0 },
+        player: PlayerSave {
+            pos: [0.0; 3],
+            yaw: 0.0,
+            pitch: 0.0,
+        },
         day_fraction: Some(0.5),
         saved_at_unix: None,
     };

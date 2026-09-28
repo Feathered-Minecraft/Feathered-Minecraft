@@ -86,12 +86,7 @@ fn voxel_range(min: f32, max: f32) -> std::ops::RangeInclusive<i64> {
 
 /// Does the player box overlap any solid voxel after moving `pos[axis]` by
 /// `d` along `axis`? Returns the first colliding voxel.
-fn collides_at(
-    pos: [f32; 3],
-    axis: usize,
-    d: f32,
-    solid: &SolidAt,
-) -> Option<(i64, i64, i64)> {
+fn collides_at(pos: [f32; 3], axis: usize, d: f32, solid: &SolidAt) -> Option<(i64, i64, i64)> {
     let mut probe = pos;
     probe[axis] += d;
     let (min, max) = (
@@ -210,9 +205,8 @@ pub fn step(
         let probe_y = body.pos[1] - 0.02;
         let (min, max) = body.aabb();
         let grounded = voxel_range(min[0], max[0]).any(|x| {
-            voxel_range(min[2], max[2]).any(|z| {
-                voxel_range(probe_y, probe_y + 0.02).any(|y| solid(x, y, z))
-            })
+            voxel_range(min[2], max[2])
+                .any(|z| voxel_range(probe_y, probe_y + 0.02).any(|y| solid(x, y, z)))
         });
         if grounded {
             if !body.on_ground {
@@ -263,7 +257,11 @@ mod tests {
             step(&mut body, 1.0 / 60.0, 0.0, 0.0, WALK_SPEED, false, &solid);
         }
         assert!(body.on_ground);
-        assert!((body.pos[1] - 10.0).abs() < 1e-4, "feet must sit on y=10, got {}", body.pos[1]);
+        assert!(
+            (body.pos[1] - 10.0).abs() < 1e-4,
+            "feet must sit on y=10, got {}",
+            body.pos[1]
+        );
     }
 
     #[test]
@@ -361,9 +359,7 @@ mod tests {
     #[test]
     fn walking_off_an_edge_falls() {
         // A platform from x = 0..8 drops off to a lower floor at y = 5.
-        let solid = |x: i64, y: i64, _: i64| {
-            y <= 5 || (x >= 0 && x < 8 && y <= 9)
-        };
+        let solid = |x: i64, y: i64, _: i64| y <= 5 || (x >= 0 && x < 8 && y <= 9);
         let mut body = PlayerBody::new([4.5, 10.0, 0.5]);
         body.on_ground = true;
         let mut airborne_seen = false;

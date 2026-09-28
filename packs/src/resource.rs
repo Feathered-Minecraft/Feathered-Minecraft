@@ -97,7 +97,9 @@ impl std::fmt::Display for ImportError {
                 "{}: not a resource pack (missing pack.mcmeta and no namespace folders)",
                 p.display()
             ),
-            ImportError::UnsafePath(p, m) => write!(f, "unsafe archive entry in {}: {m}", p.display()),
+            ImportError::UnsafePath(p, m) => {
+                write!(f, "unsafe archive entry in {}: {m}", p.display())
+            }
             ImportError::Io(p, m) => write!(f, "{}: {m}", p.display()),
         }
     }
@@ -148,7 +150,9 @@ impl ResourcePackManager {
             return Ok(Self::open_at(dir));
         }
         let base = dirs::data_dir()
-            .ok_or_else(|| ImportError::Io(PathBuf::from("<data-dir>"), "no OS data directory".into()))?
+            .ok_or_else(|| {
+                ImportError::Io(PathBuf::from("<data-dir>"), "no OS data directory".into())
+            })?
             .join("feathered")
             .join("packs");
         Ok(Self { base })
@@ -177,7 +181,10 @@ impl ResourcePackManager {
     }
 
     fn settings_path(&self) -> PathBuf {
-        self.base.parent().unwrap_or(&self.base).join("settings.json")
+        self.base
+            .parent()
+            .unwrap_or(&self.base)
+            .join("settings.json")
     }
 
     pub fn settings(&self) -> PackSettings {
@@ -269,8 +276,7 @@ impl ResourcePackManager {
     /// `<data>/packs/<slug>-<hash8>/`; the original file is untouched.
     pub fn import_zip(&self, zip_path: &Path) -> Result<ImportReport, ImportError> {
         let file = std::fs::File::open(zip_path).map_err(|e| self.io(zip_path, e))?;
-        let mut archive =
-            zip::ZipArchive::new(file).map_err(|e| self.io(zip_path, e.into()))?;
+        let mut archive = zip::ZipArchive::new(file).map_err(|e| self.io(zip_path, e.into()))?;
 
         // Validate structure BEFORE extracting anything to disk.
         let validation = Self::validate_entries(&mut archive, zip_path)?;
@@ -285,7 +291,9 @@ impl ResourcePackManager {
 
         let mut files_copied = 0u64;
         for i in 0..archive.len() {
-            let mut entry = archive.by_index(i).map_err(|e| self.io(zip_path, e.into()))?;
+            let mut entry = archive
+                .by_index(i)
+                .map_err(|e| self.io(zip_path, e.into()))?;
             if entry.is_dir() {
                 continue;
             }
@@ -331,7 +339,9 @@ impl ResourcePackManager {
             name: zip_name(zip_path),
             description,
             pack_format,
-            detected_version: pack_format.and_then(pack_format_to_version).map(str::to_string),
+            detected_version: pack_format
+                .and_then(pack_format_to_version)
+                .map(str::to_string),
             kind: PackKind::Zip,
             dir: dest.clone(),
             source: SourceInfo {
@@ -385,17 +395,25 @@ impl ResourcePackManager {
             name: display_name,
             description,
             pack_format,
-            detected_version: pack_format.and_then(pack_format_to_version).map(str::to_string),
+            detected_version: pack_format
+                .and_then(pack_format_to_version)
+                .map(str::to_string),
             kind: PackKind::Folder,
             dir: canonical,
             source: SourceInfo {
                 origin,
                 license_note: None,
             },
-            mcmeta_hash: mcmeta.is_file().then(|| hash_file(&mcmeta)).unwrap_or_default(),
+            mcmeta_hash: mcmeta
+                .is_file()
+                .then(|| hash_file(&mcmeta))
+                .unwrap_or_default(),
         };
         self.write_meta_for_folder(&pack)?;
-        Ok(ImportReport { pack, files_copied: 0 })
+        Ok(ImportReport {
+            pack,
+            files_copied: 0,
+        })
     }
 
     fn write_meta_for_folder(&self, pack: &ResourcePack) -> Result<(), ImportError> {
@@ -424,7 +442,11 @@ impl ResourcePackManager {
                     } else {
                         stack.push(p);
                     }
-                } else if p.extension().map(|e| e.eq_ignore_ascii_case("zip")).unwrap_or(false) {
+                } else if p
+                    .extension()
+                    .map(|e| e.eq_ignore_ascii_case("zip"))
+                    .unwrap_or(false)
+                {
                     if let Ok(r) = self.import_zip(&p) {
                         reports.push(r);
                     }
@@ -437,7 +459,8 @@ impl ResourcePackManager {
     /// Build the asset-compiler input index for a pack (what `compile-pack`
     /// consumes). Works identically for ZIP-extracted and folder packs.
     pub fn pack_index(&self, pack: &ResourcePack) -> Result<PackIndex, ImportError> {
-        feathered_assets::pack::discover(&pack.dir).map_err(|e| ImportError::Io(pack.dir.clone(), e.message))
+        feathered_assets::pack::discover(&pack.dir)
+            .map_err(|e| ImportError::Io(pack.dir.clone(), e.message))
     }
 
     /// Delete an imported (ZIP) pack's extracted directory and metadata.
@@ -468,10 +491,12 @@ impl ResourcePackManager {
         // Unique dir: slug + 8 hex of hash(name + timestamp).
         let mut hasher = Sha256::new();
         hasher.update(name.as_bytes());
-        hasher.update(std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos().to_le_bytes())
-            .unwrap_or([0; 16]));
+        hasher.update(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos().to_le_bytes())
+                .unwrap_or([0; 16]),
+        );
         let hash = format!("{:x}", hasher.finalize());
         self.base.join(format!("{}-{}", slug_of(name), &hash[..8]))
     }
@@ -536,7 +561,16 @@ const NON_NAMESPACE_DIRS: &[&str] = &["icons", "lang", "sounds"];
 /// Known non-pack files/dirs that may sit at the pack root and are never
 /// namespaces themselves.
 const KNOWN_PACK_FILES: &[&str] = &[
-    "pack.mcmeta", "pack.png", "assets", "data", "overlay", "credits.txt", "license", "license.txt", "README.md", "README.txt",
+    "pack.mcmeta",
+    "pack.png",
+    "assets",
+    "data",
+    "overlay",
+    "credits.txt",
+    "license",
+    "license.txt",
+    "README.md",
+    "README.txt",
 ];
 
 /// Parse `pack.mcmeta`: pack_format (+ supported_formats), description as text.
@@ -731,7 +765,9 @@ fn zip_name(p: &Path) -> String {
 fn top_level_dir(archive: &mut zip::ZipArchive<std::fs::File>) -> Option<PathBuf> {
     let mut first: Option<String> = None;
     for i in 0..archive.len() {
-        let Ok(entry) = archive.by_index(i) else { continue };
+        let Ok(entry) = archive.by_index(i) else {
+            continue;
+        };
         let name = entry.name();
         if entry.is_dir() || name.starts_with('.') {
             continue;
@@ -776,7 +812,15 @@ fn sanitize_entry(name: &str) -> Option<String> {
 }
 
 fn pack_id(dir: &Path) -> String {
-    format!("{}-{}", slug_of(&dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()), &hash_file_short(dir))
+    format!(
+        "{}-{}",
+        slug_of(
+            &dir.file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        ),
+        &hash_file_short(dir)
+    )
 }
 
 /// Directory names too generic to use as a pack display name.
@@ -809,7 +853,8 @@ fn write_meta(dir: &Path, pack: &ResourcePack) -> Result<(), ImportError> {
 }
 
 fn write_json(path: &Path, value: &impl Serialize) -> Result<(), ImportError> {
-    let text = serde_json::to_string_pretty(value).map_err(|e| ImportError::Io(path.to_path_buf(), e.to_string()))?;
+    let text = serde_json::to_string_pretty(value)
+        .map_err(|e| ImportError::Io(path.to_path_buf(), e.to_string()))?;
     std::fs::write(path, text).map_err(|e| ImportError::Io(path.to_path_buf(), e.to_string()))
 }
 

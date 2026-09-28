@@ -31,8 +31,10 @@ pub const REF_H: f32 = 1080.0;
 /// Footer links (the only external URLs the UI will ever open; the app
 /// whitelists exactly these before invoking the OS handler).
 pub const GITHUB_URL: &str = "https://github.com/Feathered-Minecraft/Feathered-Minecraft";
-pub const DOCS_URL: &str = "https://github.com/Feathered-Minecraft/Feathered-Minecraft/tree/main/docs";
-pub const LICENSE_URL: &str = "https://github.com/Feathered-Minecraft/Feathered-Minecraft/blob/main/LICENSE";
+pub const DOCS_URL: &str =
+    "https://github.com/Feathered-Minecraft/Feathered-Minecraft/tree/main/docs";
+pub const LICENSE_URL: &str =
+    "https://github.com/Feathered-Minecraft/Feathered-Minecraft/blob/main/LICENSE";
 /// The complete set of URLs the title screen may open (safety gate).
 pub const ALLOWED_URLS: [&str; 3] = [GITHUB_URL, DOCS_URL, LICENSE_URL];
 
@@ -62,9 +64,18 @@ pub struct MenuEntry {
 
 /// The three title entries — exactly Play, Settings, Quit.
 pub const MENU_ENTRIES: [MenuEntry; 3] = [
-    MenuEntry { label: "Play", icon: Icon::Play },
-    MenuEntry { label: "Settings", icon: Icon::Gear },
-    MenuEntry { label: "Quit", icon: Icon::Power },
+    MenuEntry {
+        label: "Play",
+        icon: Icon::Play,
+    },
+    MenuEntry {
+        label: "Settings",
+        icon: Icon::Gear,
+    },
+    MenuEntry {
+        label: "Quit",
+        icon: Icon::Power,
+    },
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -132,7 +143,12 @@ impl TitleLayout {
         let rows = [
             [menu_x, menu_y0_default, row_w, row_h],
             [menu_x, menu_y0_default + row_h + row_gap, row_w, row_h],
-            [menu_x, menu_y0_default + 2.0 * (row_h + row_gap), row_w, row_h],
+            [
+                menu_x,
+                menu_y0_default + 2.0 * (row_h + row_gap),
+                row_w,
+                row_h,
+            ],
         ];
         let menu_end = rows[2][1] + row_h;
 
@@ -166,7 +182,12 @@ impl TitleLayout {
         let mut footer = [[0.0f32; 4]; 3];
         let mut dividers = [0.0f32; 2];
         for i in 0..3 {
-            footer[i] = [fx, footer_y - 6.0 * s, widths[i], 7.0 * footer_scale + 12.0 * s];
+            footer[i] = [
+                fx,
+                footer_y - 6.0 * s,
+                widths[i],
+                7.0 * footer_scale + 12.0 * s,
+            ];
             fx += widths[i] + 16.0 * s;
             if i < 2 {
                 dividers[i] = fx + 4.0 * s;
@@ -297,12 +318,26 @@ pub fn draw_brand(list: &mut TriList, l: &TitleLayout, logo_art: Option<f32>) {
     let sub_w = 9.0 * adv - 11.0 * l.s;
     let sub_x = l.wordmark_x + (wm_w - sub_w) / 2.0;
     let sub_cy = l.subtitle_y + 3.5 * l.subtitle_scale;
-    draw_tracked(list, sub, sub_x, l.subtitle_y, l.subtitle_scale, adv, lin4(pal::SUBTLE));
+    draw_tracked(
+        list,
+        sub,
+        sub_x,
+        l.subtitle_y,
+        l.subtitle_scale,
+        adv,
+        lin4(pal::SUBTLE),
+    );
     // Thin rules from the wordmark edges to the subtitle.
     let ry = sub_cy - 1.0 * l.s;
     let rh = 2.0 * l.s;
     rule(list, l.wordmark_x, sub_x - 16.0 * l.s, ry, rh);
-    rule(list, sub_x + sub_w + 16.0 * l.s, l.wordmark_x + wm_w, ry, rh);
+    rule(
+        list,
+        sub_x + sub_w + 16.0 * l.s,
+        l.wordmark_x + wm_w,
+        ry,
+        rh,
+    );
 }
 
 /// MenuRail: one straight vertical line + one diamond per row, each exactly
@@ -318,7 +353,11 @@ pub fn draw_rail(list: &mut TriList, l: &TitleLayout, selected: usize) {
     );
     for i in 0..3 {
         let (cx, cy) = l.marker_center(i);
-        let r = if i == selected { l.marker_r * 1.25 } else { l.marker_r };
+        let r = if i == selected {
+            l.marker_r * 1.25
+        } else {
+            l.marker_r
+        };
         diamond(list, cx, cy, r, lin4(pal::MARKER));
     }
 }
@@ -327,12 +366,7 @@ pub fn draw_rail(list: &mut TriList, l: &TitleLayout, selected: usize) {
 /// Selected rows grow slightly around their center (a deliberate, subtle
 /// hover state). The returned rect IS the grown rect — hit-testing uses it
 /// too, so mouse input and visuals never disagree.
-pub fn draw_menu_item(
-    list: &mut TriList,
-    l: &TitleLayout,
-    i: usize,
-    selected: bool,
-) -> Rect {
+pub fn draw_menu_item(list: &mut TriList, l: &TitleLayout, i: usize, selected: bool) -> Rect {
     let base = l.rows[i];
     let r = if selected {
         grow_row(base, 1.08, l)
@@ -348,16 +382,47 @@ pub fn draw_menu_item(
     };
     // Subtle row wash on the selected row (keeps the world visible).
     if selected {
-        list.quad([x, y], [x + w, y], [x + w, y + h], [x, y + h], lin4(pal::ROW_BG_HOT));
+        list.quad(
+            [x, y],
+            [x + w, y],
+            [x + w, y + h],
+            [x, y + h],
+            lin4(pal::ROW_BG_HOT),
+        );
     }
     // Icon box: bordered square, height = row height (mock proportions).
     let b = 2.0 * l.s;
-    list.quad([x, y], [x + h, y], [x + h, y + h], [x, y + h], lin4([10, 12, 16, 150]));
+    list.quad(
+        [x, y],
+        [x + h, y],
+        [x + h, y + h],
+        [x, y + h],
+        lin4([10, 12, 16, 150]),
+    );
     list.quad([x, y], [x + h, y], [x + h, y + b], [x, y + b], box_edge);
-    list.quad([x, y + h - b], [x + h, y + h - b], [x + h, y + h], [x, y + h], box_edge);
+    list.quad(
+        [x, y + h - b],
+        [x + h, y + h - b],
+        [x + h, y + h],
+        [x, y + h],
+        box_edge,
+    );
     list.quad([x, y], [x + b, y], [x + b, y + h], [x, y + h], box_edge);
-    list.quad([x + h - b, y], [x + h, y], [x + h, y + h], [x + h - b, y + h], box_edge);
-    draw_icon(entry.icon, list, x + h * 0.28, y + h * 0.28, h * 0.44, box_edge);
+    list.quad(
+        [x + h - b, y],
+        [x + h, y],
+        [x + h, y + h],
+        [x + h - b, y + h],
+        box_edge,
+    );
+    draw_icon(
+        entry.icon,
+        list,
+        x + h * 0.28,
+        y + h * 0.28,
+        h * 0.44,
+        box_edge,
+    );
     // Label vertically centered in the row.
     let scale = 4.0 * l.s;
     let ty = y + (h - 7.0 * scale) / 2.0;
@@ -384,12 +449,22 @@ pub fn draw_version(list: &mut TriList, l: &TitleLayout) {
     list.quad(
         [l.version_bar[0], l.version_bar[1]],
         [l.version_bar[0] + l.version_bar[2], l.version_bar[1]],
-        [l.version_bar[0] + l.version_bar[2], l.version_bar[1] + l.version_bar[3]],
+        [
+            l.version_bar[0] + l.version_bar[2],
+            l.version_bar[1] + l.version_bar[3],
+        ],
         [l.version_bar[0], l.version_bar[1] + l.version_bar[3]],
         lin4([235, 238, 243, 245]),
     );
     let tx = l.version_bar[0] + 20.0 * l.s;
-    font::draw_text_shadow(list, "V1.0.0", tx, l.version_y, l.version_scale, lin4(pal::TEXT));
+    font::draw_text_shadow(
+        list,
+        "V1.0.0",
+        tx,
+        l.version_y,
+        l.version_scale,
+        lin4(pal::TEXT),
+    );
     font::draw_text_shadow(
         list,
         "FEATHERED MINECRAFT",
@@ -495,7 +570,13 @@ fn draw_icon_play(list: &mut TriList, x: f32, y: f32, w: f32, h: f32, c: [u8; 4]
     let cx = x + w * 0.5;
     let cy = y + h * 0.5;
     let s = h * 0.42;
-    list.quad([cx - s * 0.55, cy - s], [cx - s * 0.55, cy + s], [cx + s * 0.9, cy], [cx - s * 0.55, cy - s], c);
+    list.quad(
+        [cx - s * 0.55, cy - s],
+        [cx - s * 0.55, cy + s],
+        [cx + s * 0.9, cy],
+        [cx - s * 0.55, cy - s],
+        c,
+    );
 }
 
 fn draw_icon_gear(list: &mut TriList, x: f32, y: f32, w: f32, h: f32, c: [u8; 4]) {
@@ -504,11 +585,29 @@ fn draw_icon_gear(list: &mut TriList, x: f32, y: f32, w: f32, h: f32, c: [u8; 4]
     let r = h * 0.34;
     let t = h * 0.11;
     // Ring: 4 strips (approximation of a gear silhouette, monochrome).
-    list.quad([cx - r, cy - t / 2.0], [cx + r, cy - t / 2.0], [cx + r, cy + t / 2.0], [cx - r, cy + t / 2.0], c);
-    list.quad([cx - t / 2.0, cy - r], [cx + t / 2.0, cy - r], [cx + t / 2.0, cy + r], [cx - t / 2.0, cy + r], c);
+    list.quad(
+        [cx - r, cy - t / 2.0],
+        [cx + r, cy - t / 2.0],
+        [cx + r, cy + t / 2.0],
+        [cx - r, cy + t / 2.0],
+        c,
+    );
+    list.quad(
+        [cx - t / 2.0, cy - r],
+        [cx + t / 2.0, cy - r],
+        [cx + t / 2.0, cy + r],
+        [cx - t / 2.0, cy + r],
+        c,
+    );
     // Hub hole (dark center over the cross).
     let hub = t * 1.4;
-    list.quad([cx - hub / 2.0, cy - hub / 2.0], [cx + hub / 2.0, cy - hub / 2.0], [cx + hub / 2.0, cy + hub / 2.0], [cx - hub / 2.0, cy + hub / 2.0], lin4([10, 12, 16, 255]));
+    list.quad(
+        [cx - hub / 2.0, cy - hub / 2.0],
+        [cx + hub / 2.0, cy - hub / 2.0],
+        [cx + hub / 2.0, cy + hub / 2.0],
+        [cx - hub / 2.0, cy + hub / 2.0],
+        lin4([10, 12, 16, 255]),
+    );
     // Diagonal teeth.
     let d = r * 0.95;
     for (dx, dy) in [(d, d), (-d, d), (d, -d), (-d, -d)] {
@@ -529,11 +628,35 @@ fn draw_icon_power(list: &mut TriList, x: f32, y: f32, w: f32, h: f32, c: [u8; 4
     let r = h * 0.30;
     let t = h * 0.10;
     // Circle stroke (left/right/bottom strips).
-    list.quad([cx - r, cy - t / 2.0], [cx - r + t, cy - t / 2.0], [cx - r + t, cy + r * 0.72], [cx - r, cy + r * 0.72], c);
-    list.quad([cx + r - t, cy - t / 2.0], [cx + r, cy - t / 2.0], [cx + r, cy + r * 0.72], [cx + r - t, cy + r * 0.72], c);
-    list.quad([cx - r, cy + r * 0.72 - t], [cx + r, cy + r * 0.72 - t], [cx + r, cy + r * 0.72], [cx - r, cy + r * 0.72], c);
+    list.quad(
+        [cx - r, cy - t / 2.0],
+        [cx - r + t, cy - t / 2.0],
+        [cx - r + t, cy + r * 0.72],
+        [cx - r, cy + r * 0.72],
+        c,
+    );
+    list.quad(
+        [cx + r - t, cy - t / 2.0],
+        [cx + r, cy - t / 2.0],
+        [cx + r, cy + r * 0.72],
+        [cx + r - t, cy + r * 0.72],
+        c,
+    );
+    list.quad(
+        [cx - r, cy + r * 0.72 - t],
+        [cx + r, cy + r * 0.72 - t],
+        [cx + r, cy + r * 0.72],
+        [cx - r, cy + r * 0.72],
+        c,
+    );
     // Vertical bar.
-    list.quad([cx - t / 2.0, cy - r * 1.18], [cx + t / 2.0, cy - r * 1.18], [cx + t / 2.0, cy + r * 0.38], [cx - t / 2.0, cy + r * 0.38], c);
+    list.quad(
+        [cx - t / 2.0, cy - r * 1.18],
+        [cx + t / 2.0, cy - r * 1.18],
+        [cx + t / 2.0, cy + r * 0.38],
+        [cx - t / 2.0, cy + r * 0.38],
+        c,
+    );
     let _ = w;
 }
 
@@ -546,8 +669,13 @@ mod tests {
     use super::*;
     use crate::ui::hit;
 
-    const RESOLUTIONS: [(f32, f32); 5] =
-        [(1280.0, 720.0), (1600.0, 900.0), (1920.0, 1080.0), (2560.0, 1440.0), (1366.0, 768.0)];
+    const RESOLUTIONS: [(f32, f32); 5] = [
+        (1280.0, 720.0),
+        (1600.0, 900.0),
+        (1920.0, 1080.0),
+        (2560.0, 1440.0),
+        (1366.0, 768.0),
+    ];
 
     fn lt(w: f32, h: f32) -> TitleLayout {
         TitleLayout::build(w, h)
@@ -558,8 +686,14 @@ mod tests {
         for (w, h) in RESOLUTIONS {
             let l = lt(w, h);
             for i in 0..3 {
-                assert_eq!(l.rows[i][2], l.rows[0][2], "row {i} width differs at {w}x{h}");
-                assert_eq!(l.rows[i][3], l.rows[0][3], "row {i} height differs at {w}x{h}");
+                assert_eq!(
+                    l.rows[i][2], l.rows[0][2],
+                    "row {i} width differs at {w}x{h}"
+                );
+                assert_eq!(
+                    l.rows[i][3], l.rows[0][3],
+                    "row {i} height differs at {w}x{h}"
+                );
                 assert_eq!(l.rows[i][0], l.rows[0][0], "row {i} x differs at {w}x{h}");
             }
             let gap01 = l.rows[1][1] - (l.rows[0][1] + l.row_h);
@@ -574,7 +708,10 @@ mod tests {
             let l = lt(w, h);
             for i in 0..3 {
                 let (mx, my) = l.marker_center(i);
-                assert!((my - l.row_center_y(i)).abs() < 1e-4, "marker {i} not at row center");
+                assert!(
+                    (my - l.row_center_y(i)).abs() < 1e-4,
+                    "marker {i} not at row center"
+                );
                 assert!((mx - l.rail_x).abs() < 1e-4, "marker {i} off the rail");
             }
             // Markers sit left of every row (on the rail, never inside it).
@@ -592,7 +729,10 @@ mod tests {
             for i in 0..3 {
                 let ty = l.rows[i][1] + (l.row_h - 7.0 * scale) / 2.0;
                 let center_offset = (ty + 3.5 * scale) - l.row_center_y(i);
-                assert!(center_offset.abs() < 1e-3, "label row {i} not vertically centered");
+                assert!(
+                    center_offset.abs() < 1e-3,
+                    "label row {i} not vertically centered"
+                );
             }
         }
     }
@@ -615,18 +755,29 @@ mod tests {
         for (w, h) in RESOLUTIONS {
             let l = lt(w, h);
             for (i, r) in l.footer.iter().enumerate() {
-                assert!(r[0] >= 0.0 && r[0] + r[2] <= w, "footer {i} exceeds width at {w}x{h}");
+                assert!(
+                    r[0] >= 0.0 && r[0] + r[2] <= w,
+                    "footer {i} exceeds width at {w}x{h}"
+                );
                 assert!(r[1] >= h * 0.8, "footer {i} not in the bottom band");
                 assert!(r[1] + r[3] <= h, "footer {i} exceeds height");
             }
             // Ordered left → right, no overlap.
             assert!(l.footer[0][0] < l.footer[1][0] && l.footer[1][0] < l.footer[2][0]);
             // Version block (bottom-left) must not intersect the footer.
-            let vr = [l.version_bar[0], l.version_y, 300.0 * l.s, l.h - l.version_y];
+            let vr = [
+                l.version_bar[0],
+                l.version_y,
+                300.0 * l.s,
+                l.h - l.version_y,
+            ];
             for r in &l.footer {
                 let overlap_x = r[0] < vr[0] + vr[2] && vr[0] < r[0] + r[2];
                 let overlap_y = r[1] < vr[1] + vr[3] && vr[1] < r[1] + r[3];
-                assert!(!(overlap_x && overlap_y), "footer overlaps version block at {w}x{h}");
+                assert!(
+                    !(overlap_x && overlap_y),
+                    "footer overlaps version block at {w}x{h}"
+                );
             }
         }
     }
@@ -651,8 +802,14 @@ mod tests {
             let l = lt(w, h);
             let expected_s = (w / REF_W).min(h / REF_H);
             assert!((l.s - expected_s).abs() < 1e-5);
-            assert!((l.row_h / base.row_h - expected_s).abs() < 1e-4, "row_h not proportional at {w}x{h}");
-            assert!((l.rows[0][0] / base.rows[0][0] - expected_s).abs() < 1e-4, "left anchoring not proportional");
+            assert!(
+                (l.row_h / base.row_h - expected_s).abs() < 1e-4,
+                "row_h not proportional at {w}x{h}"
+            );
+            assert!(
+                (l.rows[0][0] / base.rows[0][0] - expected_s).abs() < 1e-4,
+                "left anchoring not proportional"
+            );
         }
         // Same-aspect sizes scale exactly by the ratio.
         let q = lt(960.0, 540.0);
@@ -668,7 +825,10 @@ mod tests {
             let l = lt(w, h);
             assert!(l.wordmark_x < w * 0.2, "wordmark must sit on the left");
             assert!(l.logo[0] < w * 0.2, "logo must sit on the left");
-            assert!(l.rows[0][0] + l.rows[0][2] < w * 0.55, "menu must stay in the left band");
+            assert!(
+                l.rows[0][0] + l.rows[0][2] < w * 0.55,
+                "menu must stay in the left band"
+            );
         }
     }
 
@@ -681,7 +841,10 @@ mod tests {
         assert!(grown[2] > base[2] && grown[3] > base[3]);
         let bc = (base[0] + base[2] / 2.0, base[1] + base[3] / 2.0);
         let gc = (grown[0] + grown[2] / 2.0, grown[1] + grown[3] / 2.0);
-        assert!((bc.0 - gc.0).abs() < 1e-3 && (bc.1 - gc.1).abs() < 1e-3, "grow must be centered");
+        assert!(
+            (bc.0 - gc.0).abs() < 1e-3 && (bc.1 - gc.1).abs() < 1e-3,
+            "grow must be centered"
+        );
         // Unselected rows return the base rect untouched.
         assert_eq!(l.row_hit_rect(1, false), base);
         // The grown rect is what draw_menu_item draws (same call path).

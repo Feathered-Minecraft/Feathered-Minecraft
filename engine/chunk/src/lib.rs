@@ -11,8 +11,8 @@
 //! mesher never parses assets and the compiler never sees world data.
 
 use bytemuck::{Pod, Zeroable};
-use feathered_assets::models::{face_corners, Direction, FaceQuad, SpriteId};
 use feathered_assets::compiled::CompiledAppearance;
+use feathered_assets::models::{face_corners, Direction, FaceQuad, SpriteId};
 use feathered_world::grid::World;
 use feathered_world::{resolve_appearance, AppearanceRef, Registry};
 
@@ -37,12 +37,12 @@ impl BlockSource for World {
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 pub struct Vertex {
-    pub pos: [f32; 3],   // 0..12 world blocks (chunk-local)
-    pub uv: [u16; 2],    // 12..16 (atlas texels / 65535 normalized)
-    pub tint: u32,       // 16..20 RGBA
-    pub shade: u8,       // 20
-    pub anim_id: u8,     // 21 (row-offset slot; 0 = static)
-    pub light: [u8; 2],  // 22..24 (block, sky — Phase 1 fullbright)
+    pub pos: [f32; 3],  // 0..12 world blocks (chunk-local)
+    pub uv: [u16; 2],   // 12..16 (atlas texels / 65535 normalized)
+    pub tint: u32,      // 16..20 RGBA
+    pub shade: u8,      // 20
+    pub anim_id: u8,    // 21 (row-offset slot; 0 = static)
+    pub light: [u8; 2], // 22..24 (block, sky — Phase 1 fullbright)
 }
 
 const _: () = assert!(std::mem::size_of::<Vertex>() == 24);
@@ -178,7 +178,11 @@ fn emit_quad(
     let verts: [Vertex; 4] = std::array::from_fn(|i| {
         let p = q.corners[i];
         Vertex {
-            pos: [x as f32 + p[0] / 16.0, y as f32 + p[1] / 16.0, z as f32 + p[2] / 16.0],
+            pos: [
+                x as f32 + p[0] / 16.0,
+                y as f32 + p[1] / 16.0,
+                z as f32 + p[2] / 16.0,
+            ],
             uv: uv_norm(uvs[i][0], uvs[i][1]),
             tint: tint_packed,
             shade,
@@ -272,7 +276,17 @@ fn emit_fluid(
     }
 
     for f in &faces {
-        emit_quad(out, rects, atlas_size, [255, 255, 255, 255], f, x, y, z, anim_id);
+        emit_quad(
+            out,
+            rects,
+            atlas_size,
+            [255, 255, 255, 255],
+            f,
+            x,
+            y,
+            z,
+            anim_id,
+        );
     }
 }
 
@@ -298,10 +312,7 @@ pub fn mesh_world(
     tint: &TintPolicy,
 ) -> MeshedChunk {
     let [sx, sy, sz] = world.size;
-    let bounds = (
-        [0i64, 0, 0],
-        [sx as i64, sy as i64, sz as i64],
-    );
+    let bounds = ([0i64, 0, 0], [sx as i64, sy as i64, sz as i64]);
     mesh_region(world, registry, uv_rects, atlas_size, tint, bounds)
 }
 
@@ -323,12 +334,18 @@ pub fn mesh_region(
     for y in min[1]..max[1] {
         for z in min[2]..max[2] {
             for x in min[0]..max[0] {
-                let Some((block_id, state_id)) = source.block_at(x, y, z) else { continue };
+                let Some((block_id, state_id)) = source.block_at(x, y, z) else {
+                    continue;
+                };
                 if block_id == 0 {
                     continue;
                 }
-                let Some(block) = registry.block_by_id(block_id) else { continue };
-                let Some(state) = block.state(state_id) else { continue };
+                let Some(block) = registry.block_by_id(block_id) else {
+                    continue;
+                };
+                let Some(state) = block.state(state_id) else {
+                    continue;
+                };
 
                 // Resolve appearance for this state's properties. Random
                 // pools pick ONE model per position (deterministic hash).
@@ -341,7 +358,9 @@ pub fn mesh_region(
                 let instances = resolve_appearance(appearance, &props, pos_hash(x, y, z));
 
                 for mi in instances {
-                    let Some(model) = registry.model(mi.model) else { continue };
+                    let Some(model) = registry.model(mi.model) else {
+                        continue;
+                    };
                     for q in &model.quads {
                         // Neighbor culling: only faces with a cull dir are
                         // hidden when the neighbor occludes. Out-of-region
@@ -353,7 +372,9 @@ pub fn mesh_region(
                             let neighbor_occludes = match neighbor {
                                 Some((0, _)) => false, // air
                                 Some((nid, nsid)) => {
-                                    let Some(nb) = registry.block_by_id(nid) else { continue };
+                                    let Some(nb) = registry.block_by_id(nid) else {
+                                        continue;
+                                    };
                                     let Some(ns) = nb.state(nsid) else { continue };
                                     // Same-kind culling (glass vs glass) hides
                                     // the face even though neither occludes.
@@ -383,12 +404,18 @@ pub fn mesh_region(
                             if std::env::var("FEATHERED_DEBUG_FLUID").is_ok() {
                                 eprintln!("[fluid] water at {x},{y},{z} sprite {sid:?}");
                             }
-                            emit_fluid(&mut out, &rects, atlas_size, registry, source, x, y, z, sid);
+                            emit_fluid(
+                                &mut out, &rects, atlas_size, registry, source, x, y, z, sid,
+                            );
                         }
                         None => {
                             if std::env::var("FEATHERED_DEBUG_FLUID").is_ok() {
                                 let names = registry.sprite_names();
-                                eprintln!("[fluid] water_still NOT FOUND; have {} sprites, sample: {:?}", names.len(), names.iter().find(|(_, p)| p.contains("water")));
+                                eprintln!(
+                                    "[fluid] water_still NOT FOUND; have {} sprites, sample: {:?}",
+                                    names.len(),
+                                    names.iter().find(|(_, p)| p.contains("water"))
+                                );
                             }
                         }
                     }

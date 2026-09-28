@@ -44,7 +44,12 @@ impl PlayerController {
     }
 
     /// One fixed-step simulation slice.
-    fn fixed_step(&mut self, intent: &crate::input::MoveIntent, camera: &feathered_renderer::Camera, solid: &feathered_world::physics::SolidAt) {
+    fn fixed_step(
+        &mut self,
+        intent: &crate::input::MoveIntent,
+        camera: &feathered_renderer::Camera,
+        solid: &feathered_world::physics::SolidAt,
+    ) {
         // Camera-relative horizontal basis (yaw only; no flying).
         let (sin_y, cos_y) = camera.yaw.sin_cos();
         let forward = [sin_y, 0.0, -cos_y];
@@ -66,15 +71,7 @@ impl PlayerController {
                 1.0
             };
 
-        physics::step(
-            &mut self.body,
-            FIXED_DT,
-            mx,
-            mz,
-            speed,
-            intent.jump,
-            solid,
-        );
+        physics::step(&mut self.body, FIXED_DT, mx, mz, speed, intent.jump, solid);
     }
 
     /// Simulate `dt` seconds in fixed slices. Returns true when the player
@@ -171,14 +168,23 @@ mod tests {
         // inside the x=0 column and block every step.)
         let mut ctl = PlayerController::new([1.5, 10.0, 0.5], 1.0);
         ctl.body.on_ground = true;
-        let intent = crate::input::MoveIntent { forward: 1.0, right: 0.0, jump: false, sprint: false };
+        let intent = crate::input::MoveIntent {
+            forward: 1.0,
+            right: 0.0,
+            jump: false,
+            sprint: false,
+        };
         for _ in 0..60 {
             ctl.update(1.0 / 60.0, &intent, &mut cam, &solid);
         }
         // After ~1 s of walking (with acceleration-free instant velocity),
         // the player must have moved toward -z. Spawn y=10 is ON the floor
         // top so horizontal movement is unobstructed.
-        assert!(ctl.body.pos[2] < -0.5, "moved -z, got z={}", ctl.body.pos[2]);
+        assert!(
+            ctl.body.pos[2] < -0.5,
+            "moved -z, got z={}",
+            ctl.body.pos[2]
+        );
         assert!(
             (ctl.body.pos[0] - 1.5).abs() < 0.01,
             "no sideways drift from spawn x=1.5, got x={}",
@@ -234,8 +240,18 @@ mod tests {
         let mut sprint = PlayerController::new([0.5, 10.0, 0.5], 1.0);
         sprint.body.on_ground = true;
 
-        let i_walk = crate::input::MoveIntent { forward: 1.0, right: 0.0, jump: false, sprint: false };
-        let i_sprint = crate::input::MoveIntent { forward: 1.0, right: 0.0, jump: false, sprint: true };
+        let i_walk = crate::input::MoveIntent {
+            forward: 1.0,
+            right: 0.0,
+            jump: false,
+            sprint: false,
+        };
+        let i_sprint = crate::input::MoveIntent {
+            forward: 1.0,
+            right: 0.0,
+            jump: false,
+            sprint: true,
+        };
         let mut cam_a = mk_cam();
         let mut cam_b = mk_cam();
         for _ in 0..120 {

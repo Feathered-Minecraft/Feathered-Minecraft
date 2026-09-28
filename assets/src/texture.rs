@@ -55,7 +55,12 @@ pub fn decode_png(path: &Path, meta: crate::meta::TextureMeta) -> AssetResult<De
             (w, h, buf.into_raw())
         }
     };
-    Ok(DecodedTexture { width, height, rgba, meta })
+    Ok(DecodedTexture {
+        width,
+        height,
+        rgba,
+        meta,
+    })
 }
 
 pub use std::path::Path;

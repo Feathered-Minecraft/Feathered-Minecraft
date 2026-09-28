@@ -141,10 +141,16 @@ impl AnimationRaw {
 
 /// Parse a `.mcmeta` sidecar JSON document.
 pub fn parse_mcmeta(path: &str, json: &str) -> AssetResult<(TextureMeta, Option<AnimationRaw>)> {
-    let doc: McmetaJson = serde_json::from_str(json)
-        .map_err(|e| crate::error::AssetError { path: path.into(), message: e.to_string() })?;
+    let doc: McmetaJson = serde_json::from_str(json).map_err(|e| crate::error::AssetError {
+        path: path.into(),
+        message: e.to_string(),
+    })?;
     let mut meta = TextureMeta {
-        alpha_cutoff_bias: doc.texture.as_ref().and_then(|t| t.alpha_cutoff_bias).unwrap_or(0.0),
+        alpha_cutoff_bias: doc
+            .texture
+            .as_ref()
+            .and_then(|t| t.alpha_cutoff_bias)
+            .unwrap_or(0.0),
         ..TextureMeta::default()
     };
     if let Some(tex) = &doc.texture {
@@ -159,10 +165,7 @@ pub fn parse_mcmeta(path: &str, json: &str) -> AssetResult<(TextureMeta, Option<
             Some("dark_cutout") => MipStrategy::DarkCutout,
             Some("mean") | None => MipStrategy::Mean,
             Some(other) => {
-                return crate::error::err(
-                    path,
-                    format!("unknown mipmap_strategy `{other}`"),
-                )
+                return crate::error::err(path, format!("unknown mipmap_strategy `{other}`"))
             }
         };
     }

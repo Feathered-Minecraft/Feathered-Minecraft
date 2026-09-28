@@ -44,45 +44,88 @@ pub fn hit(r: Rect, p: (f32, f32)) -> bool {
 }
 
 /// Draw one menu button. Returns its rect (for hit-testing).
-pub fn button(
-    list: &mut TriList,
-    cx: f32,
-    y: f32,
-    w: f32,
-    label: &str,
-    state: Hover,
-) -> Rect {
+pub fn button(list: &mut TriList, cx: f32, y: f32, w: f32, label: &str, state: Hover) -> Rect {
     let x = cx - w / 2.0;
     let r = [x, y, w, BUTTON_H];
     let (face, edge, text) = match state {
-        Hover::Hovered => (lin4([70, 70, 78, 235]), lin4([190, 195, 210, 255]), lin4([255, 240, 160, 255])),
-        Hover::Idle => (lin4([46, 46, 52, 225]), lin4([110, 112, 124, 255]), lin4([235, 235, 235, 255])),
-        Hover::Disabled => (lin4([34, 34, 38, 190]), lin4([70, 70, 78, 160]), lin4([120, 120, 120, 190])),
+        Hover::Hovered => (
+            lin4([70, 70, 78, 235]),
+            lin4([190, 195, 210, 255]),
+            lin4([255, 240, 160, 255]),
+        ),
+        Hover::Idle => (
+            lin4([46, 46, 52, 225]),
+            lin4([110, 112, 124, 255]),
+            lin4([235, 235, 235, 255]),
+        ),
+        Hover::Disabled => (
+            lin4([34, 34, 38, 190]),
+            lin4([70, 70, 78, 160]),
+            lin4([120, 120, 120, 190]),
+        ),
     };
     // Face + border strips (crisp 2px, like the hotbar).
-    list.quad([x, y], [x + w, y], [x + w, y + BUTTON_H], [x, y + BUTTON_H], face);
+    list.quad(
+        [x, y],
+        [x + w, y],
+        [x + w, y + BUTTON_H],
+        [x, y + BUTTON_H],
+        face,
+    );
     const B: f32 = 2.0;
     list.quad([x, y], [x + w, y], [x + w, y + B], [x, y + B], edge);
-    list.quad([x, y + BUTTON_H - B], [x + w, y + BUTTON_H - B], [x + w, y + BUTTON_H], [x, y + BUTTON_H], edge);
-    list.quad([x, y], [x + B, y], [x + B, y + BUTTON_H], [x, y + BUTTON_H], edge);
-    list.quad([x + w - B, y], [x + w, y], [x + w, y + BUTTON_H], [x + w - B, y + BUTTON_H], edge);
+    list.quad(
+        [x, y + BUTTON_H - B],
+        [x + w, y + BUTTON_H - B],
+        [x + w, y + BUTTON_H],
+        [x, y + BUTTON_H],
+        edge,
+    );
+    list.quad(
+        [x, y],
+        [x + B, y],
+        [x + B, y + BUTTON_H],
+        [x, y + BUTTON_H],
+        edge,
+    );
+    list.quad(
+        [x + w - B, y],
+        [x + w, y],
+        [x + w, y + BUTTON_H],
+        [x + w - B, y + BUTTON_H],
+        edge,
+    );
     // Centered label.
-    font::draw_text_shadow(list, label, cx - font::text_width(label, 2.0) / 2.0, y + (BUTTON_H - 7.0 * 2.0) / 2.0, 2.0, text);
+    font::draw_text_shadow(
+        list,
+        label,
+        cx - font::text_width(label, 2.0) / 2.0,
+        y + (BUTTON_H - 7.0 * 2.0) / 2.0,
+        2.0,
+        text,
+    );
     r
 }
 
 /// Small variant (world rows, list entries).
-pub fn small_button(
-    list: &mut TriList,
-    r: Rect,
-    label: &str,
-    state: Hover,
-) {
+pub fn small_button(list: &mut TriList, r: Rect, label: &str, state: Hover) {
     let [x, y, w, h] = r;
     let (face, edge, text) = match state {
-        Hover::Hovered => (lin4([70, 70, 78, 235]), lin4([190, 195, 210, 255]), lin4([255, 240, 160, 255])),
-        Hover::Idle => (lin4([46, 46, 52, 225]), lin4([110, 112, 124, 255]), lin4([235, 235, 235, 255])),
-        Hover::Disabled => (lin4([34, 34, 38, 190]), lin4([70, 70, 78, 160]), lin4([120, 120, 120, 190])),
+        Hover::Hovered => (
+            lin4([70, 70, 78, 235]),
+            lin4([190, 195, 210, 255]),
+            lin4([255, 240, 160, 255]),
+        ),
+        Hover::Idle => (
+            lin4([46, 46, 52, 225]),
+            lin4([110, 112, 124, 255]),
+            lin4([235, 235, 235, 255]),
+        ),
+        Hover::Disabled => (
+            lin4([34, 34, 38, 190]),
+            lin4([70, 70, 78, 160]),
+            lin4([120, 120, 120, 190]),
+        ),
     };
     list.quad([x, y], [x + w, y], [x + w, y + h], [x, y + h], face);
     list.quad([x, y], [x + w, y], [x + w, y + 2.0], [x, y + 2.0], edge);
@@ -107,24 +150,59 @@ pub fn text_field(
     const H: f32 = 34.0;
     let x = cx - w / 2.0;
     let r = [x, y, w, H];
-    let edge = if focused { [220, 225, 240, 255] } else { [110, 112, 124, 255] };
-    list.quad([x, y], [x + w, y], [x + w, y + H], [x, y + H], [22, 22, 26, 235]);
+    let edge = if focused {
+        [220, 225, 240, 255]
+    } else {
+        [110, 112, 124, 255]
+    };
+    list.quad(
+        [x, y],
+        [x + w, y],
+        [x + w, y + H],
+        [x, y + H],
+        [22, 22, 26, 235],
+    );
     const B: f32 = 2.0;
     list.quad([x, y], [x + w, y], [x + w, y + B], [x, y + B], edge);
-    list.quad([x, y + H - B], [x + w, y + H - B], [x + w, y + H], [x, y + H], edge);
+    list.quad(
+        [x, y + H - B],
+        [x + w, y + H - B],
+        [x + w, y + H],
+        [x, y + H],
+        edge,
+    );
     list.quad([x, y], [x + B, y], [x + B, y + H], [x, y + H], edge);
-    list.quad([x + w - B, y], [x + w, y], [x + w, y + H], [x + w - B, y + H], edge);
+    list.quad(
+        [x + w - B, y],
+        [x + w, y],
+        [x + w, y + H],
+        [x + w - B, y + H],
+        edge,
+    );
     // Small caption above the box.
     font::draw_text_shadow(list, label, x + 2.0, y - 12.0, 1.5, [200, 200, 210, 230]);
     // Value (left-aligned inside).
     let text_scale = 1.5;
-    font::draw_text(list, value, x + 8.0, y + (H - 7.0 * text_scale) / 2.0, text_scale, [240, 240, 240, 255]);
+    font::draw_text(
+        list,
+        value,
+        x + 8.0,
+        y + (H - 7.0 * text_scale) / 2.0,
+        text_scale,
+        [240, 240, 240, 255],
+    );
     // Caret: a 2px bar after the cursor-th character when focused.
     if focused {
         let before = &value[..char_byte_index(value, cursor)];
         let tx = x + 8.0 + font::text_width(before, text_scale);
         let ty = y + (H - 7.0 * text_scale) / 2.0;
-        list.quad([tx, ty], [tx + 2.0, ty], [tx + 2.0, ty + 7.0 * text_scale], [tx, ty + 7.0 * text_scale], [240, 240, 240, 230]);
+        list.quad(
+            [tx, ty],
+            [tx + 2.0, ty],
+            [tx + 2.0, ty + 7.0 * text_scale],
+            [tx, ty + 7.0 * text_scale],
+            [240, 240, 240, 230],
+        );
     }
     r
 }
@@ -145,20 +223,54 @@ pub fn slider_row(
         Hover::Hovered => lin4([190, 195, 210, 255]),
         _ => [110, 112, 124, 255],
     };
-    list.quad([x, y], [x + w, y], [x + w, y + h], [x, y + h], [30, 30, 36, 225]);
+    list.quad(
+        [x, y],
+        [x + w, y],
+        [x + w, y + h],
+        [x, y + h],
+        [30, 30, 36, 225],
+    );
     list.quad([x, y], [x + w, y], [x + w, y + 2.0], [x, y + 2.0], edge);
-    font::draw_text_shadow(list, label, x + 10.0, y + (h - 7.0 * 1.5) / 2.0, 1.5, [235, 235, 235, 255]);
+    font::draw_text_shadow(
+        list,
+        label,
+        x + 10.0,
+        y + (h - 7.0 * 1.5) / 2.0,
+        1.5,
+        [235, 235, 235, 255],
+    );
     let vw = font::text_width(value, 1.5);
     let arrow_w = 22.0f32;
     let mut left = None;
     let mut right = None;
     if arrows {
-        font::draw_text(list, "<", x + w - arrow_w * 2.0 - vw - 12.0, y + (h - 7.0 * 1.5) / 2.0, 1.5, [200, 205, 220, 255]);
-        font::draw_text(list, ">", x + w - arrow_w - 6.0, y + (h - 7.0 * 1.5) / 2.0, 1.5, [200, 205, 220, 255]);
+        font::draw_text(
+            list,
+            "<",
+            x + w - arrow_w * 2.0 - vw - 12.0,
+            y + (h - 7.0 * 1.5) / 2.0,
+            1.5,
+            [200, 205, 220, 255],
+        );
+        font::draw_text(
+            list,
+            ">",
+            x + w - arrow_w - 6.0,
+            y + (h - 7.0 * 1.5) / 2.0,
+            1.5,
+            [200, 205, 220, 255],
+        );
         left = Some([x + w - arrow_w * 2.0 - vw - 12.0, y, arrow_w, h]);
         right = Some([x + w - arrow_w - 6.0, y, arrow_w, h]);
     } else {
-        font::draw_text_shadow(list, value, x + w - vw - 10.0, y + (h - 7.0 * 1.5) / 2.0, 1.5, [235, 235, 235, 255]);
+        font::draw_text_shadow(
+            list,
+            value,
+            x + w - vw - 10.0,
+            y + (h - 7.0 * 1.5) / 2.0,
+            1.5,
+            [235, 235, 235, 255],
+        );
     }
     (r, left, right)
 }
@@ -170,10 +282,7 @@ pub fn stack_y(n: usize, h: f32) -> f32 {
 
 /// Byte index of character `idx` in `s` (clamped).
 pub fn char_byte_index(s: &str, idx: usize) -> usize {
-    s.char_indices()
-        .nth(idx)
-        .map(|(b, _)| b)
-        .unwrap_or(s.len())
+    s.char_indices().nth(idx).map(|(b, _)| b).unwrap_or(s.len())
 }
 
 #[cfg(test)]
@@ -232,10 +341,24 @@ mod tests {
     #[test]
     fn slider_row_reports_arrows_only_when_adjustable() {
         let mut list = TriList::default();
-        let (r, l, rt) = slider_row(&mut list, [0.0, 0.0, 400.0, 30.0], "QUALITY", "HIGH", true, Hover::Idle);
+        let (r, l, rt) = slider_row(
+            &mut list,
+            [0.0, 0.0, 400.0, 30.0],
+            "QUALITY",
+            "HIGH",
+            true,
+            Hover::Idle,
+        );
         assert!(l.is_some() && rt.is_some());
         assert!(hit(r, (5.0, 5.0)));
-        let (_, l2, r2) = slider_row(&mut list, [0.0, 0.0, 400.0, 30.0], "NAME", "Steve", false, Hover::Idle);
+        let (_, l2, r2) = slider_row(
+            &mut list,
+            [0.0, 0.0, 400.0, 30.0],
+            "NAME",
+            "Steve",
+            false,
+            Hover::Idle,
+        );
         assert!(l2.is_none() && r2.is_none());
     }
 }

@@ -31,7 +31,10 @@ impl RawModel {
 #[serde(untagged)]
 pub enum RawTextureValue {
     Str(String),
-    Sprite { sprite: String, force_translucent: Option<bool> },
+    Sprite {
+        sprite: String,
+        force_translucent: Option<bool>,
+    },
 }
 
 impl RawTextureValue {
@@ -43,7 +46,13 @@ impl RawTextureValue {
     }
 
     pub fn force_translucent(&self) -> bool {
-        matches!(self, RawTextureValue::Sprite { force_translucent: Some(true), .. })
+        matches!(
+            self,
+            RawTextureValue::Sprite {
+                force_translucent: Some(true),
+                ..
+            }
+        )
     }
 }
 

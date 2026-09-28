@@ -196,7 +196,11 @@ mod tests {
         let (loaded, ok) = Controls::load(&path);
         assert!(ok);
         assert_eq!(loaded.jump, KeyCode::KeyC);
-        assert_eq!(loaded.forward, KeyCode::KeyW, "untouched keys keep defaults");
+        assert_eq!(
+            loaded.forward,
+            KeyCode::KeyW,
+            "untouched keys keep defaults"
+        );
 
         // Corrupt file → clean defaults, never a crash.
         std::fs::write(&path, b"{ not json ").unwrap();

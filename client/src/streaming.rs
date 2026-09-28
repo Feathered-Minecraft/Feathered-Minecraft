@@ -19,8 +19,8 @@
 //! `Streamer` without a self-referential borrow.
 
 use feathered_chunk::{mesh_region, MeshedChunk, TintPolicy};
-use feathered_world::save::WorldSave;
 use feathered_world::chunks::{Chunk, ChunkPos, ChunkedWorld, CHUNK_X, CHUNK_Z};
+use feathered_world::save::WorldSave;
 use feathered_world::{LightGrid, Registry, TerrainGenerator};
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -164,7 +164,11 @@ impl Streamer {
             out.push((d2, pos));
         }
         out.sort_by_key(|b| std::cmp::Reverse(b.0)); // farthest first
-        self.unload_queue = out.into_iter().take(UNLOAD_BUDGET).map(|(_, p)| p).collect();
+        self.unload_queue = out
+            .into_iter()
+            .take(UNLOAD_BUDGET)
+            .map(|(_, p)| p)
+            .collect();
     }
 
     /// Produce at most one chunk job (load or unload). Callers run this in
@@ -307,15 +311,8 @@ impl Streamer {
         // function of terrain + edits even mid-frame).
         let (bx, bz) = ChunkPos::of_block(x, z).min_block();
         let _ = (bx, bz);
-        if let Some(chunk) = self
-            .world
-            .get_chunk_mut(ChunkPos::of_block(x, z))
-        {
-            let (lx, y_, lz) = (
-                (x - bx) as u32,
-                y as u32,
-                (z - bz) as u32,
-            );
+        if let Some(chunk) = self.world.get_chunk_mut(ChunkPos::of_block(x, z)) {
+            let (lx, y_, lz) = ((x - bx) as u32, y as u32, (z - bz) as u32);
             chunk.set_local(lx, y_, lz, block, state);
         }
         self.stats.edits = self.edits.len();
@@ -429,7 +426,9 @@ impl Streamer {
     /// one) while `poll` still supplies the meshes over the next frames.
     pub fn preload_around(&mut self, registry: &Registry, center: ChunkPos, radius: i32) {
         let missing: Vec<ChunkPos> = (-radius..=radius)
-            .flat_map(|dz| (-radius..=radius).map(move |dx| ChunkPos::new(center.x + dx, center.z + dz)))
+            .flat_map(|dz| {
+                (-radius..=radius).map(move |dx| ChunkPos::new(center.x + dx, center.z + dz))
+            })
             .filter(|p| !self.world.contains(*p))
             .collect();
         if missing.is_empty() {
@@ -487,7 +486,11 @@ impl Streamer {
 fn surface_height(chunk: &Chunk, lx: u32, lz: u32) -> u32 {
     let mut top = 1u32;
     for y in (0..feathered_world::grid::WORLD_H).rev() {
-        if chunk.get_local(lx, y, lz).map(|(b, _)| b != 0).unwrap_or(false) {
+        if chunk
+            .get_local(lx, y, lz)
+            .map(|(b, _)| b != 0)
+            .unwrap_or(false)
+        {
             top = y + 1;
             break;
         }
@@ -566,7 +569,11 @@ mod tests {
         // Converged state: exactly the new center's circle — the unload
         // sweep drops every loaded chunk outside the ring (old ring AND
         // old fringe chunks; fringes regenerate on demand when needed).
-        assert_eq!(s.world.len(), 13, "converged to the circle (fringe unloaded)");
+        assert_eq!(
+            s.world.len(),
+            13,
+            "converged to the circle (fringe unloaded)"
+        );
         assert!(
             s.world.contains(ChunkPos::new(1, 0)) && s.is_meshed(ChunkPos::new(1, 0)),
             "the new center chunk is meshed"
@@ -737,7 +744,11 @@ mod tests {
         // The old area is gone; the new ring (+fringe) is loaded; bounded.
         assert!(!s.world.contains(center), "old area unloaded");
         assert!(s.world.contains(far), "new area loaded");
-        assert!(s.world.len() <= 61, "bounded after teleport: {}", s.world.len());
+        assert!(
+            s.world.len() <= 61,
+            "bounded after teleport: {}",
+            s.world.len()
+        );
     }
 
     #[test]
@@ -801,7 +812,10 @@ mod tests {
             s.record_edit(8, y, 8, stone, 0);
         }
         let h = s.spawn_height(&reg);
-        assert!(h >= 70.0, "spawn surface must reflect journaled edits (got {h})");
+        assert!(
+            h >= 70.0,
+            "spawn surface must reflect journaled edits (got {h})"
+        );
     }
 
     #[test]

@@ -15,8 +15,8 @@
 
 pub mod controller;
 pub mod controls;
-pub mod entities_host;
 pub mod daycycle;
+pub mod entities_host;
 pub mod font;
 pub mod input;
 pub mod interaction;
@@ -370,8 +370,6 @@ impl AppState {
         }
     }
 
-
-
     fn sandbox_update(&mut self, dt: f32) {
         // Streaming first (ground must exist before physics probes it).
         self.pump_streaming();
@@ -492,7 +490,14 @@ impl AppState {
                     self.record_edit(x, y, z, 0, 0);
                     // Particle burst colored from the block's sprite tint.
                     let color = self.block_color(x, y, z);
-                    overlay::spawn_burst(&mut self.particles, x, y, z, color, (x as u64) ^ ((y as u64) << 21) ^ ((z as u64) << 42));
+                    overlay::spawn_burst(
+                        &mut self.particles,
+                        x,
+                        y,
+                        z,
+                        color,
+                        (x as u64) ^ ((y as u64) << 21) ^ ((z as u64) << 42),
+                    );
                     self.feedback = Some((
                         std::time::Instant::now(),
                         format!("broke block at {x},{y},{z}"),
@@ -536,10 +541,7 @@ impl AppState {
         if wheel != 0 {
             self.hotbar.cycle(wheel);
             if let Some(block) = self.hotbar.selected_block() {
-                self.feedback = Some((
-                    std::time::Instant::now(),
-                    format!("selected: {block}"),
-                ));
+                self.feedback = Some((std::time::Instant::now(), format!("selected: {block}")));
             }
         }
 
@@ -613,7 +615,9 @@ impl AppState {
     /// Atomic-save the world (journal + metadata). Feedback on failure only
     /// — a failed autosave must never crash gameplay.
     fn save_world(&mut self) -> bool {
-        let Some(dir) = self.world_dir.clone() else { return false };
+        let Some(dir) = self.world_dir.clone() else {
+            return false;
+        };
         let save = self.build_world_save();
         match feathered_world::save::save_to_dir(&dir, &save) {
             Ok(_) => {
@@ -622,10 +626,7 @@ impl AppState {
                 true
             }
             Err(e) => {
-                self.feedback = Some((
-                    std::time::Instant::now(),
-                    format!("save failed: {e}"),
-                ));
+                self.feedback = Some((std::time::Instant::now(), format!("save failed: {e}")));
                 false
             }
         }
@@ -654,10 +655,7 @@ impl AppState {
                     restore = Some(save.meta.player);
                     loaded_day = Some(save.meta.day_fraction);
                     loaded_save = Some(save);
-                    println!(
-                        "world: loaded edit journal from {}",
-                        world_dir.display()
-                    );
+                    println!("world: loaded edit journal from {}", world_dir.display());
                 }
                 Err(e) => eprintln!("world: save unreadable ({e}) — starting fresh"),
             }
@@ -818,11 +816,11 @@ impl AppState {
             let st = self.streamer.stats();
             let fps = self.fps_ema;
             let lines = [
-                format!("FEATHERED {fps:.0} FPS ({:.1} MS)", self.frame_dt_ema * 1000.0),
                 format!(
-                    "XYZ {:.2} / {:.2} / {:.2}",
-                    pos[0], pos[1], pos[2]
+                    "FEATHERED {fps:.0} FPS ({:.1} MS)",
+                    self.frame_dt_ema * 1000.0
                 ),
+                format!("XYZ {:.2} / {:.2} / {:.2}", pos[0], pos[1], pos[2]),
                 format!(
                     "CHUNK {} {}  IN {:?} {:?}",
                     chunk.x,
@@ -840,7 +838,10 @@ impl AppState {
                 ),
                 format!(
                     "GPU CHUNKS {}",
-                    self.renderer.as_ref().map(|r| r.streamed_chunks()).unwrap_or(0)
+                    self.renderer
+                        .as_ref()
+                        .map(|r| r.streamed_chunks())
+                        .unwrap_or(0)
                 ),
                 format!("SEED {}", self.streamer.seed()),
                 format!(
@@ -848,13 +849,26 @@ impl AppState {
                     self.day.fraction,
                     if self.day.is_night() { "NIGHT" } else { "DAY" }
                 ),
-                format!("QUALITY {:?}", self.renderer.as_ref().map(|r| r.settings().quality).unwrap_or(feathered_renderer::RenderQuality::Medium)),
+                format!(
+                    "QUALITY {:?}",
+                    self.renderer
+                        .as_ref()
+                        .map(|r| r.settings().quality)
+                        .unwrap_or(feathered_renderer::RenderQuality::Medium)
+                ),
                 format!("PACK {}", self.pack_label),
                 format!(
                     "SHADER {}",
                     self.shader_label.as_deref().unwrap_or("(none)")
                 ),
-                format!("SAVE {}", if self.save_timer > 0.0 { "PENDING" } else { "OK" }),
+                format!(
+                    "SAVE {}",
+                    if self.save_timer > 0.0 {
+                        "PENDING"
+                    } else {
+                        "OK"
+                    }
+                ),
             ];
             for (i, line) in lines.iter().enumerate() {
                 font::draw_text_shadow(
@@ -872,12 +886,24 @@ impl AppState {
 
     fn validation_update(&mut self, dt: f32) {
         let (mut dx, mut dz, mut dy) = (0.0f32, 0.0f32, 0.0f32);
-        if self.input.key_down(KeyCode::KeyW) { dz += 1.0; }
-        if self.input.key_down(KeyCode::KeyS) { dz -= 1.0; }
-        if self.input.key_down(KeyCode::KeyA) { dx -= 1.0; }
-        if self.input.key_down(KeyCode::KeyD) { dx += 1.0; }
-        if self.input.key_down(KeyCode::Space) { dy += 1.0; }
-        if self.input.key_down(KeyCode::ShiftLeft) { dy -= 1.0; }
+        if self.input.key_down(KeyCode::KeyW) {
+            dz += 1.0;
+        }
+        if self.input.key_down(KeyCode::KeyS) {
+            dz -= 1.0;
+        }
+        if self.input.key_down(KeyCode::KeyA) {
+            dx -= 1.0;
+        }
+        if self.input.key_down(KeyCode::KeyD) {
+            dx += 1.0;
+        }
+        if self.input.key_down(KeyCode::Space) {
+            dy += 1.0;
+        }
+        if self.input.key_down(KeyCode::ShiftLeft) {
+            dy -= 1.0;
+        }
 
         let (sin_y, cos_y) = self.camera.yaw.sin_cos();
         let forward = [sin_y, 0.0, -cos_y];
@@ -996,7 +1022,8 @@ impl ApplicationHandler for App {
             .with_surface_size(winit::dpi::LogicalSize::new(1280.0, 720.0));
         // Shared ownership (see AppState.window): renderer + client both
         // hold the window alive; the surface outlives input usage.
-        let window: Arc<dyn Window> = Arc::from(event_loop.create_window(attrs).expect("create window"));
+        let window: Arc<dyn Window> =
+            Arc::from(event_loop.create_window(attrs).expect("create window"));
 
         // Load cache (already compiled by `feathered compile-pack`).
         let blob = std::fs::read(&self.opts.cache_path).unwrap_or_else(|e| {
@@ -1007,10 +1034,7 @@ impl ApplicationHandler for App {
         });
         let (_, payload) = feathered_assets::cache::decode(&blob).expect("cache decode");
         let registry = Registry::from_compiled(payload.pack);
-        let atlas = std::sync::Arc::new(cached_to_atlas(
-            &payload.atlas,
-            registry.sprite_names(),
-        ));
+        let atlas = std::sync::Arc::new(cached_to_atlas(&payload.atlas, registry.sprite_names()));
         self.atlas = Some(atlas.clone());
 
         let size = window.surface_size();
@@ -1024,7 +1048,8 @@ impl ApplicationHandler for App {
                 quality: self.opts.quality,
                 shader_pack: self.opts.shader_pack.clone(),
             },
-        ));                let mut renderer = renderer;
+        ));
+        let mut renderer = renderer;
 
         // Shader-pack configuration bridge (unchanged from Phase 2).
         if let Some(pack_dir) = &self.opts.shader_config_path {
@@ -1112,7 +1137,8 @@ impl ApplicationHandler for App {
                 // of the day cycle / pack config; cleared when a world starts.
                 renderer.set_sun_phase_override(Some(MENU_SUN_PHASE));
                 let panorama_view = settings.view_distance.max(3);
-                let profile = profile::ProfileStore::new(self.opts.worlds_dir.join("profile")).load();
+                let profile =
+                    profile::ProfileStore::new(self.opts.worlds_dir.join("profile")).load();
                 let mut menu = menu::MenuState::new(&self.opts.worlds_dir, settings, profile);
                 // The title screen draws its own logo art (logo.png) over
                 // the user-supplied background (background.png) + fade.
@@ -1143,7 +1169,15 @@ impl ApplicationHandler for App {
                 };
                 let controller =
                     controller::PlayerController::new([0.5, eye_h, 0.5], self.opts.sensitivity);
-                (GameMode::Menu { menu: Box::new(menu) }, Default::default(), camera, controller, Some(streamer))
+                (
+                    GameMode::Menu {
+                        menu: Box::new(menu),
+                    },
+                    Default::default(),
+                    camera,
+                    controller,
+                    Some(streamer),
+                )
             }
             SceneKind::Sandbox => {
                 // The streamer owns its world, generator and atlas table; the
@@ -1195,9 +1229,7 @@ impl ApplicationHandler for App {
                     Some(p) => [p.pos[0] as f32, p.pos[1] as f32, p.pos[2] as f32],
                     None => [0.5, spawn_h + 0.01, 0.5],
                 };
-                let (yaw, pitch) = restore
-                    .map(|p| (p.yaw, p.pitch))
-                    .unwrap_or((0.0, 0.0));
+                let (yaw, pitch) = restore.map(|p| (p.yaw, p.pitch)).unwrap_or((0.0, 0.0));
                 let controller = controller::PlayerController::new(spawn, self.opts.sensitivity);
                 let camera = feathered_renderer::Camera {
                     pos: controller.body.eye(),
@@ -1212,7 +1244,13 @@ impl ApplicationHandler for App {
                     // Applied to AppState's clock below.
                     day_fraction_restore = Some(f);
                 }
-                (GameMode::Sandbox, Default::default(), camera, controller, Some(streamer))
+                (
+                    GameMode::Sandbox,
+                    Default::default(),
+                    camera,
+                    controller,
+                    Some(streamer),
+                )
             }
         };
 
@@ -1268,9 +1306,8 @@ impl ApplicationHandler for App {
             settings: {
                 // Load once here (menus keep the same copy live); CLI flags
                 // override the saved values for direct sandbox launches.
-                let (mut s, _) = settings::Settings::load(&settings::Settings::path_for(
-                    &self.opts.worlds_dir,
-                ));
+                let (mut s, _) =
+                    settings::Settings::load(&settings::Settings::path_for(&self.opts.worlds_dir));
                 if self.opts.scene == SceneKind::Sandbox {
                     s.sensitivity = self.opts.sensitivity;
                     s.fov = self.opts.fov;
@@ -1287,7 +1324,12 @@ impl ApplicationHandler for App {
         });
     }
 
-    fn window_event(&mut self, event_loop: &dyn ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+    fn window_event(
+        &mut self,
+        event_loop: &dyn ActiveEventLoop,
+        _id: WindowId,
+        event: WindowEvent,
+    ) {
         let Some(state) = &mut self.state else { return };
         match event {
             WindowEvent::CloseRequested => {
@@ -1370,7 +1412,9 @@ impl ApplicationHandler for App {
                         }
                     }
                     if let Some(action) = menu_action {
-                        if let Some(p) = App::handle_menu_action(&self.opts, state, event_loop, action) {
+                        if let Some(p) =
+                            App::handle_menu_action(&self.opts, state, event_loop, action)
+                        {
                             self.pending_world = Some(p);
                         }
                     }
@@ -1457,14 +1501,15 @@ impl ApplicationHandler for App {
                     }
                 }
             }
-            WindowEvent::PointerButton { state: btn_state, button, .. } => {
+            WindowEvent::PointerButton {
+                state: btn_state,
+                button,
+                ..
+            } => {
                 let pressed = btn_state == ElementState::Pressed;
                 // Paused sandbox: any click resumes capture (standard FPS
                 // behavior; the PAUSED hint says so).
-                if pressed
-                    && !state.mouse_captured
-                    && matches!(state.mode, GameMode::Sandbox)
-                {
+                if pressed && !state.mouse_captured && matches!(state.mode, GameMode::Sandbox) {
                     state.capture_cursor();
                 }
                 // Menu clicks (physical px positions; draw hit-rects are in
@@ -1481,7 +1526,8 @@ impl ApplicationHandler for App {
                     }
                 }
                 if let Some(action) = menu_action {
-                    if let Some(p) = App::handle_menu_action(&self.opts, state, event_loop, action) {
+                    if let Some(p) = App::handle_menu_action(&self.opts, state, event_loop, action)
+                    {
                         self.pending_world = Some(p);
                     }
                 }
@@ -1559,7 +1605,12 @@ impl ApplicationHandler for App {
         // Upload the title logo once the overlay state exists (set_overlay
         // initializes it lazily; the first frame may miss the art).
         if !self.logo_applied {
-            if state.renderer.as_ref().map(|r| r.overlay_ready()).unwrap_or(false) {
+            if state
+                .renderer
+                .as_ref()
+                .map(|r| r.overlay_ready())
+                .unwrap_or(false)
+            {
                 if let Some(r) = &mut state.renderer {
                     if let Some((w, h, rgba, _)) = &self.logo {
                         r.set_logo_texture(*w, *h, rgba.clone());
@@ -1695,7 +1746,8 @@ impl App {
             }
             menu::MenuAction::JoinServer(_) => {
                 if let GameMode::Menu { menu, .. } = &mut state.mode {
-                    menu.toast = "Multiplayer is not implemented yet — servers save for later".into();
+                    menu.toast =
+                        "Multiplayer is not implemented yet — servers save for later".into();
                 }
             }
             menu::MenuAction::OpenUrl(url) => {
@@ -1745,7 +1797,11 @@ fn open_external(url: &str) {
 
 /// The ten-block validation scene (Phase 1 world — preserved verbatim).
 fn build_validation_world(registry: &Registry) -> World {
-    let id = |name: &str| registry.block_id(name).unwrap_or_else(|| panic!("block {name} missing"));
+    let id = |name: &str| {
+        registry
+            .block_id(name)
+            .unwrap_or_else(|| panic!("block {name} missing"))
+    };
     let mut world = World::new([32, 16, 32]);
 
     let stone = id("stone");

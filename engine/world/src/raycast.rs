@@ -92,9 +92,21 @@ pub fn raycast(origin: [f32; 3], dir: [f32; 3], max_dist: f32, hits: &HitsAt) ->
 
     // t-delta: ray length to cross one full voxel per axis.
     let t_delta = [
-        if d[0] != 0.0 { 1.0 / d[0].abs() } else { f32::INFINITY },
-        if d[1] != 0.0 { 1.0 / d[1].abs() } else { f32::INFINITY },
-        if d[2] != 0.0 { 1.0 / d[2].abs() } else { f32::INFINITY },
+        if d[0] != 0.0 {
+            1.0 / d[0].abs()
+        } else {
+            f32::INFINITY
+        },
+        if d[1] != 0.0 {
+            1.0 / d[1].abs()
+        } else {
+            f32::INFINITY
+        },
+        if d[2] != 0.0 {
+            1.0 / d[2].abs()
+        } else {
+            f32::INFINITY
+        },
     ];
 
     // t at which the ray reaches each axis's next boundary (ray-parameter
@@ -178,7 +190,10 @@ mod tests {
         let hit = raycast([0.5, 20.0, 0.5], [0.0, -1.0, 0.0], 32.0, &hits).expect("hit floor");
         assert_eq!((hit.x, hit.y, hit.z), (0, 9, 0));
         assert_eq!(hit.face, Face::Up);
-        assert!((hit.distance - 10.0).abs() < 1e-5, "eye is 10 above the face");
+        assert!(
+            (hit.distance - 10.0).abs() < 1e-5,
+            "eye is 10 above the face"
+        );
         assert!((hit.point[1] - 10.0).abs() < 1e-5);
     }
 
@@ -199,7 +214,13 @@ mod tests {
         let hit = raycast([1.5, 10.0, 0.5], [1.0, 0.0, 0.0], 16.0, &hits).unwrap();
         assert_eq!(hit.face.neighbor(hit.x, hit.y, hit.z), (4, 10, 0));
         // Top face: neighbor above.
-        let down = raycast([0.5, 20.0, 0.5], [0.0, -1.0, 0.0], 32.0, &|_: i64, y: i64, _: i64| y <= 9).unwrap();
+        let down = raycast(
+            [0.5, 20.0, 0.5],
+            [0.0, -1.0, 0.0],
+            32.0,
+            &|_: i64, y: i64, _: i64| y <= 9,
+        )
+        .unwrap();
         assert_eq!(down.face.neighbor(down.x, down.y, down.z), (0, 10, 0));
     }
 
@@ -207,13 +228,8 @@ mod tests {
     fn diagonal_ray_hits_the_expected_voxel() {
         // Single solid voxel at (3, 10, 3).
         let hits = |x: i64, y: i64, z: i64| (x, y, z) == (3, 10, 3);
-        let hit = raycast(
-            [0.5, 10.5, 0.5],
-            [3.0, 0.0, 3.0],
-            16.0,
-            &hits,
-        )
-        .expect("diagonal must hit the cube");
+        let hit = raycast([0.5, 10.5, 0.5], [3.0, 0.0, 3.0], 16.0, &hits)
+            .expect("diagonal must hit the cube");
         assert_eq!((hit.x, hit.y, hit.z), (3, 10, 3));
         // Moving +x and +z equally: the ray enters exactly at the corner
         // (x=3, z=3); the tie must resolve to a definite face whose normal

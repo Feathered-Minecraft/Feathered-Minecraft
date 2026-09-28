@@ -17,7 +17,11 @@ use feathered_world::grid::World;
 use feathered_world::Registry;
 
 fn test_pack_root() -> &'static str {
-    for p in ["texture/assets", "../texture/assets", "../../texture/assets"] {
+    for p in [
+        "texture/assets",
+        "../texture/assets",
+        "../../texture/assets",
+    ] {
         if std::path::Path::new(p).join("pack.mcmeta").exists() {
             return p;
         }
@@ -64,12 +68,22 @@ fn rects(fx: &Fixture) -> impl Fn(u32) -> Option<(u32, u32, u32, u32, u32, u32, 
         let name = fx.registry.sprite_names().get(sprite_id as usize)?;
         let e = fx.atlas.get(&name.0, &name.1)?;
         let opaque = sprite_is_opaque(&fx.atlas, sprite_id, &fx.registry);
-        Some((e.x, e.y, e.frame_w, e.frame_h, e.frames, e.frame_stride, opaque))
+        Some((
+            e.x,
+            e.y,
+            e.frame_w,
+            e.frame_h,
+            e.frames,
+            e.frame_stride,
+            opaque,
+        ))
     }
 }
 
 fn white_tint() -> TintPolicy {
-    TintPolicy { tint0: [255, 255, 255, 255] }
+    TintPolicy {
+        tint0: [255, 255, 255, 255],
+    }
 }
 
 #[test]
@@ -84,10 +98,20 @@ fn buried_stone_generates_zero_faces() {
             }
         }
     }
-    let mesh = mesh_world(&world, &fx.registry, &rects(&fx), (fx.atlas.width, fx.atlas.height), &white_tint());
+    let mesh = mesh_world(
+        &world,
+        &fx.registry,
+        &rects(&fx),
+        (fx.atlas.width, fx.atlas.height),
+        &white_tint(),
+    );
     // A fully occluded 8³ block of stone has no visible faces at all, and the
     // world border never exposes shell faces either.
-    assert_eq!(mesh.opaque.vertices.len(), 0, "interior stone must cull entirely");
+    assert_eq!(
+        mesh.opaque.vertices.len(),
+        0,
+        "interior stone must cull entirely"
+    );
     assert_eq!(mesh.cutout.vertices.len(), 0);
 }
 
@@ -99,7 +123,13 @@ fn exposed_stone_generates_exactly_six_faces_per_cube() {
     // Single stone block floating in air: 6 faces = 24 verts.
     // (stone.json lists a 4-entry random pool; the mesher must pick ONE.)
     world.set(4, 4, 4, stone, 0);
-    let mesh = mesh_world(&world, &fx.registry, &rects(&fx), (fx.atlas.width, fx.atlas.height), &white_tint());
+    let mesh = mesh_world(
+        &world,
+        &fx.registry,
+        &rects(&fx),
+        (fx.atlas.width, fx.atlas.height),
+        &white_tint(),
+    );
     assert_eq!(mesh.opaque.vertices.len(), 24);
     assert_eq!(mesh.opaque.indices.len(), 36);
 }
@@ -114,15 +144,37 @@ fn random_variant_pool_picks_deterministically() {
     for x in 0..8 {
         world.set(x, 4, 4, stone, 0);
     }
-    let mesh_a = mesh_world(&world, &fx.registry, &rects(&fx), (fx.atlas.width, fx.atlas.height), &white_tint());
-    let mesh_b = mesh_world(&world, &fx.registry, &rects(&fx), (fx.atlas.width, fx.atlas.height), &white_tint());
+    let mesh_a = mesh_world(
+        &world,
+        &fx.registry,
+        &rects(&fx),
+        (fx.atlas.width, fx.atlas.height),
+        &white_tint(),
+    );
+    let mesh_b = mesh_world(
+        &world,
+        &fx.registry,
+        &rects(&fx),
+        (fx.atlas.width, fx.atlas.height),
+        &white_tint(),
+    );
     // Out-of-world borders count as occluders, so the bar at y=4 spanning the
     // full x range shows only its 4 exposed sides per block (top/bottom face
     // air, ends against the border): 4 × 8 blocks = 32 quads = 128 verts.
     assert_eq!(mesh_a.opaque.vertices.len(), 128);
     assert_eq!(mesh_a.opaque.indices.len(), 32 * 6);
-    let bytes_a: Vec<u8> = mesh_a.opaque.vertices.iter().flat_map(|v| bytemuck::bytes_of(v).to_vec()).collect();
-    let bytes_b: Vec<u8> = mesh_b.opaque.vertices.iter().flat_map(|v| bytemuck::bytes_of(v).to_vec()).collect();
+    let bytes_a: Vec<u8> = mesh_a
+        .opaque
+        .vertices
+        .iter()
+        .flat_map(|v| bytemuck::bytes_of(v).to_vec())
+        .collect();
+    let bytes_b: Vec<u8> = mesh_b
+        .opaque
+        .vertices
+        .iter()
+        .flat_map(|v| bytemuck::bytes_of(v).to_vec())
+        .collect();
     assert_eq!(bytes_a, bytes_b, "variant pick must be deterministic");
 }
 
@@ -132,11 +184,27 @@ fn cross_plants_land_in_cutout_layer() {
     let mut world = World::new([8, 8, 8]);
     let grass = fx.registry.block_id("short_grass").unwrap();
     world.set(4, 1, 4, grass, 0);
-    let tint = TintPolicy { tint0: [145, 189, 89, 255] };
-    let mesh = mesh_world(&world, &fx.registry, &rects(&fx), (fx.atlas.width, fx.atlas.height), &tint);
+    let tint = TintPolicy {
+        tint0: [145, 189, 89, 255],
+    };
+    let mesh = mesh_world(
+        &world,
+        &fx.registry,
+        &rects(&fx),
+        (fx.atlas.width, fx.atlas.height),
+        &tint,
+    );
     // tinted_cross is double-sided: 2 planes × 2 faces = 4 quads = 16 verts.
-    assert_eq!(mesh.cutout.vertices.len(), 16, "double-sided cross = 4 quads");
-    assert_eq!(mesh.opaque.vertices.len(), 0, "plants never land on the opaque layer");
+    assert_eq!(
+        mesh.cutout.vertices.len(),
+        16,
+        "double-sided cross = 4 quads"
+    );
+    assert_eq!(
+        mesh.opaque.vertices.len(),
+        0,
+        "plants never land on the opaque layer"
+    );
     // Cross quads carry the plains tint.
     assert!(mesh.cutout.vertices.iter().any(|v| v.tint != 0xFFFFFFFF));
 }
@@ -152,16 +220,34 @@ fn glass_goes_cutout_and_neighbors_stay_visible() {
     world.set(3, 1, 2, stone, 0);
     world.set(2, 2, 2, glass, 0);
     world.set(3, 2, 2, glass, 0);
-    let mesh = mesh_world(&world, &fx.registry, &rects(&fx), (fx.atlas.width, fx.atlas.height), &white_tint());
+    let mesh = mesh_world(
+        &world,
+        &fx.registry,
+        &rects(&fx),
+        (fx.atlas.width, fx.atlas.height),
+        &white_tint(),
+    );
     // Two stones, fully exposed except the shared stone-stone interface
     // (culls BOTH faces: 12 - 2 = 10 quads); glass never occludes them.
-    assert_eq!(mesh.opaque.vertices.len(), 40, "stone faces must survive under glass (10 quads)");
+    assert_eq!(
+        mesh.opaque.vertices.len(),
+        40,
+        "stone faces must survive under glass (10 quads)"
+    );
     // Pack ground truth: glass.json sets `force_translucent: true`, so the
     // pack itself demands the alpha-blended layer. The interior texels are
     // alpha=0 (blend output ~0) and the frame texels carry alpha ~200, so the
     // result matches vanilla's look; cutout stays reserved for leaves/plants.
-    assert_eq!(mesh.translucent.vertices.len(), 32, "glass renders on its pack-declared layer (8 quads)");
-    assert_eq!(mesh.cutout.vertices.len(), 0, "no cutout quads in this scene");
+    assert_eq!(
+        mesh.translucent.vertices.len(),
+        32,
+        "glass renders on its pack-declared layer (8 quads)"
+    );
+    assert_eq!(
+        mesh.cutout.vertices.len(),
+        0,
+        "no cutout quads in this scene"
+    );
     // Quad count check: 12 glass faces - 2 shared glass-glass (same_block_cull)
     // - 2 bottoms against stone occluders = 8 quads (the 32 verts above).
 }
@@ -175,12 +261,33 @@ fn water_renders_engine_fluid_on_translucent_layer() {
     // top = 6 quads at 14/16 height; all on the translucent layer with an
     // anim slot assigned.
     world.set(4, 4, 4, water, 0);
-    let mesh = mesh_world(&world, &fx.registry, &rects(&fx), (fx.atlas.width, fx.atlas.height), &white_tint());
-    assert_eq!(mesh.translucent.vertices.len(), 24, "still water cube = 6 quads");
-    assert!(mesh.translucent.vertices.iter().any(|v| v.anim_id > 0), "water carries an anim slot");
+    let mesh = mesh_world(
+        &world,
+        &fx.registry,
+        &rects(&fx),
+        (fx.atlas.width, fx.atlas.height),
+        &white_tint(),
+    );
+    assert_eq!(
+        mesh.translucent.vertices.len(),
+        24,
+        "still water cube = 6 quads"
+    );
+    assert!(
+        mesh.translucent.vertices.iter().any(|v| v.anim_id > 0),
+        "water carries an anim slot"
+    );
     // Surface sits at 14/16 above the block origin (y=4).
-    let max_y = mesh.translucent.vertices.iter().map(|v| v.pos[1]).fold(f32::NEG_INFINITY, f32::max);
-    assert!((max_y - (4.0 + 14.0 / 16.0)).abs() < 1e-5, "water surface at 14/16, got {max_y}");
+    let max_y = mesh
+        .translucent
+        .vertices
+        .iter()
+        .map(|v| v.pos[1])
+        .fold(f32::NEG_INFINITY, f32::max);
+    assert!(
+        (max_y - (4.0 + 14.0 / 16.0)).abs() < 1e-5,
+        "water surface at 14/16, got {max_y}"
+    );
     // Fully surrounded water has no faces at all.
     let mut w2 = World::new([8, 8, 8]);
     for x in 0..8 {
@@ -190,8 +297,18 @@ fn water_renders_engine_fluid_on_translucent_layer() {
             }
         }
     }
-    let m2 = mesh_world(&w2, &fx.registry, &rects(&fx), (fx.atlas.width, fx.atlas.height), &white_tint());
-    assert_eq!(m2.translucent.vertices.len(), 0, "buried water culls entirely");
+    let m2 = mesh_world(
+        &w2,
+        &fx.registry,
+        &rects(&fx),
+        (fx.atlas.width, fx.atlas.height),
+        &white_tint(),
+    );
+    assert_eq!(
+        m2.translucent.vertices.len(),
+        0,
+        "buried water culls entirely"
+    );
 }
 
 #[test]
@@ -212,9 +329,17 @@ fn rotated_log_axis_lands_end_caps_on_x_and_z() {
     };
     // Schema order is axis=x, axis=y, axis=z (state 0,1,2).
     let y_state = dirs_of(1);
-    assert_eq!(y_state, [0, 1, 2, 3, 4, 5], "axis=y keeps all six dirs distinct");
+    assert_eq!(
+        y_state,
+        [0, 1, 2, 3, 4, 5],
+        "axis=y keeps all six dirs distinct"
+    );
     let x_state = dirs_of(0);
-    assert_eq!(x_state, [0, 1, 2, 3, 4, 5], "axis=x still has six distinct dirs");
+    assert_eq!(
+        x_state,
+        [0, 1, 2, 3, 4, 5],
+        "axis=x still has six distinct dirs"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -227,8 +352,8 @@ fn chunk_region_meshing_culls_across_chunk_borders() {
     // Meshed through a RegionView over the loaded pair, the interior
     // stone-stone faces must cull exactly as they do in the flat world.
     let fx = fixture();
-    use feathered_world::chunks::{Chunk, ChunkPos, ChunkedWorld};
     use feathered_chunk::mesh_region;
+    use feathered_world::chunks::{Chunk, ChunkPos, ChunkedWorld};
     let reg = &fx.registry;
     // (The generator-based comparison proved too sensitive to boundary-
     // straddling rotated quads; the hand-built scene below pins the exact
@@ -252,7 +377,14 @@ fn chunk_region_meshing_culls_across_chunk_borders() {
     }
     let view2 = world.region_view(ChunkPos::new(0, 0));
     let (min2, max2) = view2.center_bounds();
-    let mesh = mesh_region(&view2, reg, &rects(&fx), (fx.atlas.width, fx.atlas.height), &white_tint(), (min2, max2));
+    let mesh = mesh_region(
+        &view2,
+        reg,
+        &rects(&fx),
+        (fx.atlas.width, fx.atlas.height),
+        &white_tint(),
+        (min2, max2),
+    );
     // The slab's interior faces cull: 16×16 top faces = 256 quads (1024
     // verts) + 16×4 side faces (top block sides; bottom culls against y=3
     // air? No: y=3 is air so bottom faces emit — 256 quads) + 64 side faces
@@ -294,7 +426,14 @@ fn chunk_region_meshing_culls_across_chunk_borders() {
         world2.insert(chunk);
     }
     let view3 = world2.region_view(ChunkPos::new(0, 0));
-    let mesh3 = mesh_region(&view3, reg, &rects(&fx), (fx.atlas.width, fx.atlas.height), &white_tint(), (min2, max2));
+    let mesh3 = mesh_region(
+        &view3,
+        reg,
+        &rects(&fx),
+        (fx.atlas.width, fx.atlas.height),
+        &white_tint(),
+        (min2, max2),
+    );
     let east_side_faces_open = mesh3
         .opaque
         .vertices
@@ -321,6 +460,14 @@ fn region_view_border_reads_reach_neighbor_chunks() {
     world.insert(b);
     let view = world.region_view(ChunkPos::new(0, 0));
     assert_eq!(view.get(15, 5, 0), Some((9, 3)), "own edge visible");
-    assert_eq!(view.get(16, 5, 0), Some((7, 1)), "neighbor's first block visible across the border");
-    assert_eq!(view.get(32, 5, 0), None, "beyond the loaded pair is None (occluding)");
+    assert_eq!(
+        view.get(16, 5, 0),
+        Some((7, 1)),
+        "neighbor's first block visible across the border"
+    );
+    assert_eq!(
+        view.get(32, 5, 0),
+        None,
+        "beyond the loaded pair is None (occluding)"
+    );
 }

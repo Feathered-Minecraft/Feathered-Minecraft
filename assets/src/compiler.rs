@@ -8,7 +8,9 @@
 
 use crate::atlas::Atlas;
 use crate::blockstates::{self, StateAppearance};
-use crate::compiled::{CompiledAppearance, CompiledPack, RuntimeAnim, RuntimeBlock, RuntimeModel, RuntimeState};
+use crate::compiled::{
+    CompiledAppearance, CompiledPack, RuntimeAnim, RuntimeBlock, RuntimeModel, RuntimeState,
+};
 use crate::error::AssetResult;
 use crate::models::{self, ModelId, SpriteId, SpriteInterner};
 use crate::pack::PackIndex;
@@ -40,7 +42,10 @@ pub struct CompileStats {
 
 /// Compile the whole pack. `required_only = true` compiles just the ten
 /// validation blocks (fast iteration); `false` compiles everything.
-pub fn compile_pack(index: &PackIndex, required_only: bool) -> AssetResult<(CompiledPack, Atlas, CompileStats)> {
+pub fn compile_pack(
+    index: &PackIndex,
+    required_only: bool,
+) -> AssetResult<(CompiledPack, Atlas, CompileStats)> {
     // ---- Stage 1: sprites -------------------------------------------------
     let store = SpriteStore::load(index)?;
 
@@ -64,9 +69,9 @@ pub fn compile_pack(index: &PackIndex, required_only: bool) -> AssetResult<(Comp
     let mut model_table: Vec<models::CompiledModel> = Vec::new();
     let mut model_ids: HashMap<(String, String), ModelId> = HashMap::new();
     let compile_model = |name: &(String, String),
-                             interner: &mut SpriteInterner,
-                             model_table: &mut Vec<models::CompiledModel>,
-                             model_ids: &mut HashMap<(String, String), ModelId>|
+                         interner: &mut SpriteInterner,
+                         model_table: &mut Vec<models::CompiledModel>,
+                         model_ids: &mut HashMap<(String, String), ModelId>|
      -> Option<ModelId> {
         if let Some(id) = model_ids.get(name) {
             return Some(*id);
@@ -114,7 +119,9 @@ pub fn compile_pack(index: &PackIndex, required_only: bool) -> AssetResult<(Comp
         };
         let Some(appearance) = appearance else {
             skipped += 1;
-            eprintln!("asset warning: blockstate {ns}:{block_name} has neither variants nor multipart");
+            eprintln!(
+                "asset warning: blockstate {ns}:{block_name} has neither variants nor multipart"
+            );
             continue;
         };
 
@@ -140,7 +147,8 @@ pub fn compile_pack(index: &PackIndex, required_only: bool) -> AssetResult<(Comp
                 .first()
                 .and_then(|mi| model_table.get(mi.model.0 as usize))
                 .map(|m| {
-                    let geometry_full = blockstates::classify_occlusion(&m.quads) == blockstates::Occlusion::Full;
+                    let geometry_full =
+                        blockstates::classify_occlusion(&m.quads) == blockstates::Occlusion::Full;
                     let sprite_opaque = particle_is_opaque(&m.particle);
                     let occ = if geometry_full && sprite_opaque {
                         blockstates::Occlusion::Full
@@ -181,12 +189,8 @@ pub fn compile_pack(index: &PackIndex, required_only: bool) -> AssetResult<(Comp
                     // Rewrite every instance list inside the appearance.
                     for (_, models) in v.iter_mut() {
                         for inst in models.iter_mut() {
-                            inst.model = bake_rotated(
-                                inst.model,
-                                &inst.rot,
-                                &mut model_table,
-                                &mut baked,
-                            );
+                            inst.model =
+                                bake_rotated(inst.model, &inst.rot, &mut model_table, &mut baked);
                         }
                     }
                     continue;
@@ -244,7 +248,11 @@ pub fn compile_pack(index: &PackIndex, required_only: bool) -> AssetResult<(Comp
     // ---- Stage 5: assemble CompiledPack -----------------------------------
     let mut animations = Vec::new();
     for (i, name) in sprite_names.iter().enumerate() {
-        if let Some((anim, entry)) = atlas.animations.get(name).map(|a| (a, atlas.get(&name.0, &name.1).unwrap())) {
+        if let Some((anim, entry)) = atlas
+            .animations
+            .get(name)
+            .map(|a| (a, atlas.get(&name.0, &name.1).unwrap()))
+        {
             animations.push(RuntimeAnim {
                 sprite: SpriteId(i as u32),
                 frametime: anim.frametime,

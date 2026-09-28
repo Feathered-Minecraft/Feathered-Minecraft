@@ -91,7 +91,11 @@ fn arg_flag(args: &[String], flag: &str) -> bool {
 }
 
 fn parse_quality(args: &[String]) -> feathered_packs::Quality {
-    match arg_value(args, "--quality").as_deref().map(str::to_ascii_lowercase).as_deref() {
+    match arg_value(args, "--quality")
+        .as_deref()
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
         Some("low") => feathered_packs::Quality::Low,
         Some("high") => feathered_packs::Quality::High,
         Some("ultra") => feathered_packs::Quality::Ultra,
@@ -158,7 +162,9 @@ fn packs(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             let settings = mgr.settings();
             match settings.active_pack {
                 Some(ref id) => println!("active pack: {id}"),
-                None => println!("active pack: (none selected — run `feathered first-run` or `packs use <id>`)"),
+                None => println!(
+                    "active pack: (none selected — run `feathered first-run` or `packs use <id>`)"
+                ),
             }
         }
         "import" => {
@@ -192,8 +198,12 @@ fn packs(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             let packs = mgr.list()?;
             let pack = packs
                 .iter()
-                .find(|p| p.id == *id || p.id.starts_with(id.as_str()) || p.name.eq_ignore_ascii_case(id))
-                .ok_or_else(|| format!("no installed pack matches \"{id}\" (see `feathered packs list`)"))?;
+                .find(|p| {
+                    p.id == *id || p.id.starts_with(id.as_str()) || p.name.eq_ignore_ascii_case(id)
+                })
+                .ok_or_else(|| {
+                    format!("no installed pack matches \"{id}\" (see `feathered packs list`)")
+                })?;
             let mut settings = mgr.settings();
             settings.active_pack = Some(pack.id.clone());
             settings.pack_format = pack.pack_format;
@@ -224,7 +234,9 @@ fn packs(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             std::fs::create_dir_all(mgr.base_dir())?;
             println!("resource-pack folder: {}", mgr.base_dir().display());
             if !settings.onboarded {
-                println!("(zip files placed here are found by `feathered packs list` after import)");
+                println!(
+                    "(zip files placed here are found by `feathered packs list` after import)"
+                );
             }
             open_in_explorer(mgr.base_dir());
         }
@@ -234,7 +246,9 @@ fn packs(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 println!("  {label}\n    {url}");
             }
             println!("\n{}", feathered_packs::DEFAULT_TEMPLATE_NOTE);
-            println!("Feathered itself remains GPL-3.0 — third-party packs keep their own licenses.");
+            println!(
+                "Feathered itself remains GPL-3.0 — third-party packs keep their own licenses."
+            );
         }
         "scan" => {
             // Bulk-import from a Minecraft-style resourcepacks directory.
@@ -294,7 +308,10 @@ fn shaders(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             } else {
                 mgr.import_zip(&p)?
             };
-            println!("imported shader pack \"{}\" ({:?})", pack.name, pack.profile);
+            println!(
+                "imported shader pack \"{}\" ({:?})",
+                pack.name, pack.profile
+            );
             println!("  {}", pack.license_summary());
         }
         "enable" => {
@@ -304,7 +321,9 @@ fn shaders(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             let packs = mgr.list()?;
             let pack = packs
                 .iter()
-                .find(|p| p.id == *id || p.id.starts_with(id.as_str()) || p.name.eq_ignore_ascii_case(id))
+                .find(|p| {
+                    p.id == *id || p.id.starts_with(id.as_str()) || p.name.eq_ignore_ascii_case(id)
+                })
                 .ok_or_else(|| format!("no installed shader pack matches \"{id}\""))?;
             mgr.enable(pack)?;
             println!("enabled: {} ({:?})", pack.name, pack.profile);
@@ -327,7 +346,10 @@ fn shaders(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             println!("uninstalled: {}", pack.name);
         }
         other => {
-            return Err(format!("unknown shaders action: {other} (list|import|enable|disable|uninstall)").into());
+            return Err(format!(
+                "unknown shaders action: {other} (list|import|enable|disable|uninstall)"
+            )
+            .into());
         }
     }
     Ok(())
@@ -339,7 +361,9 @@ fn shaders(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
 /// Resolve the pack directory to compile: the selected pack's folder when the
 /// manager has an active pack, otherwise the classic local `--pack-dir`.
-fn resolve_pack_dir(args: &[String]) -> Result<(PathBuf, Option<String>), Box<dyn std::error::Error>> {
+fn resolve_pack_dir(
+    args: &[String],
+) -> Result<(PathBuf, Option<String>), Box<dyn std::error::Error>> {
     let mgr = feathered_packs::ResourcePackManager::open()?;
     if let Ok(settings) = std::fs::read_to_string(settings_path(&mgr)) {
         if let Ok(settings) = serde_json::from_str::<feathered_packs::PackSettings>(&settings) {
@@ -354,18 +378,23 @@ fn resolve_pack_dir(args: &[String]) -> Result<(PathBuf, Option<String>), Box<dy
             }
         }
     }
-    let dir = PathBuf::from(arg_value(args, "--pack-dir").unwrap_or_else(|| "texture/assets".into()));
+    let dir =
+        PathBuf::from(arg_value(args, "--pack-dir").unwrap_or_else(|| "texture/assets".into()));
     Ok((dir, None))
 }
 
 fn settings_path(mgr: &feathered_packs::ResourcePackManager) -> PathBuf {
-    mgr.base_dir().parent().unwrap_or(mgr.base_dir()).join("settings.json")
+    mgr.base_dir()
+        .parent()
+        .unwrap_or(mgr.base_dir())
+        .join("settings.json")
 }
 
 fn compile_pack(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let (pack_dir, pack_name) = resolve_pack_dir(args)?;
     let out = PathBuf::from(
-        arg_value(args, "--out").unwrap_or_else(|| default_cache().into_os_string().into_string().unwrap()),
+        arg_value(args, "--out")
+            .unwrap_or_else(|| default_cache().into_os_string().into_string().unwrap()),
     );
     let required_only = arg_flag(args, "--required");
 
@@ -413,7 +442,9 @@ fn compile_pack(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     );
     println!(
         "atlas: {}x{} ({} mips)",
-        stats.atlas_size.0, stats.atlas_size.1, atlas.mip_levels()
+        stats.atlas_size.0,
+        stats.atlas_size.1,
+        atlas.mip_levels()
     );
     println!(
         "cache: {} ({} KB, digest {:02x}{:02x}...) in {:.2?}",
@@ -429,12 +460,17 @@ fn compile_pack(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 fn validate(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let (pack_dir, _) = resolve_pack_dir(args)?;
     let cache_path = PathBuf::from(
-        arg_value(args, "--cache").unwrap_or_else(|| default_cache().into_os_string().into_string().unwrap()),
+        arg_value(args, "--cache")
+            .unwrap_or_else(|| default_cache().into_os_string().into_string().unwrap()),
     );
 
     let blob = std::fs::read(&cache_path)?;
-    let (_, payload) = feathered_assets::cache::decode(&blob)
-        .map_err(|e| format!("cache {} unusable: {e} (run compile-pack)", cache_path.display()))?;
+    let (_, payload) = feathered_assets::cache::decode(&blob).map_err(|e| {
+        format!(
+            "cache {} unusable: {e} (run compile-pack)",
+            cache_path.display()
+        )
+    })?;
 
     let runtime = feathered_world::Registry::from_compiled(payload.pack);
     let atlas = feathered_assets::cache::cached_to_atlas(&payload.atlas, runtime.sprite_names());
@@ -455,7 +491,8 @@ fn validate(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 fn render(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     // Auto-compile when the cache is missing (first run after pack selection).
     let cache_path = PathBuf::from(
-        arg_value(args, "--cache").unwrap_or_else(|| default_cache().into_os_string().into_string().unwrap()),
+        arg_value(args, "--cache")
+            .unwrap_or_else(|| default_cache().into_os_string().into_string().unwrap()),
     );
     if !cache_path.exists() {
         println!("no compiled cache found — compiling current pack first...");

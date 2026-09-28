@@ -25,7 +25,10 @@ fn headless_renderer() -> feathered_renderer::Renderer {
         720,
         &atlas,
         Default::default(),
-        RenderSettings { quality: RenderQuality::Medium, shader_pack: None },
+        RenderSettings {
+            quality: RenderQuality::Medium,
+            shader_pack: None,
+        },
     ))
 }
 
@@ -61,8 +64,8 @@ fn menu_title_preview() {
         feathered_client::profile::Profile::default(),
     );
     menu.cursor = (400.0, 500.0); // hover the singleplayer button
-    // Logo art: the real logo.png when present (same lookup as the app's
-    // run()), else a synthetic orange gradient so the test stays hermetic.
+                                  // Logo art: the real logo.png when present (same lookup as the app's
+                                  // run()), else a synthetic orange gradient so the test stays hermetic.
     let logo_path = format!("{}/../../logo.png", env!("CARGO_MANIFEST_DIR"));
     match std::fs::read(&logo_path)
         .ok()
@@ -97,10 +100,18 @@ fn menu_title_preview() {
         screen: convert(&lists.screen),
         world: convert(&lists.world),
     };
-    r.render_capture(&feathered_chunk::MeshedChunk::default(), &sample_camera(), 0);
+    r.render_capture(
+        &feathered_chunk::MeshedChunk::default(),
+        &sample_camera(),
+        0,
+    );
     r.set_overlay(draw);
     // Second capture consumes the pending overlay set after render_capture.
-    r.render_capture(&feathered_chunk::MeshedChunk::default(), &sample_camera(), 0);
+    r.render_capture(
+        &feathered_chunk::MeshedChunk::default(),
+        &sample_camera(),
+        0,
+    );
     let frame = r.capture_last_frame().expect("frame");
     assert_eq!(r.frame_size(), (W, H));
     save_png("target/menu-ui-preview.png", &frame, W, H);
@@ -128,7 +139,10 @@ fn menu_title_preview() {
     // between the edges (a rectangular panel would clamp at full black).
     let mid = px(900, 360);
     let ml = mid.iter().map(|&c| c as u32).sum::<u32>();
-    assert!(ml > ll && ml < rl, "gradient must transition smoothly (left {ll}, mid {ml}, right {rl})");
+    assert!(
+        ml > ll && ml < rl,
+        "gradient must transition smoothly (left {ll}, mid {ml}, right {rl})"
+    );
     // Feather band upper-left: brighter than the panel (white art + tint).
     let feather = px(120, 120);
     let fl = feather.iter().map(|&c| c as u32).sum::<u32>();
@@ -157,13 +171,36 @@ fn textured_quads_sample_the_logo() {
 
     let mut list = feathered_client::overlay::TriList::default();
     // Textured quad covering the left half of the frame.
-    list.textured_quad([0.0, 360.0], [640.0, 360.0], [640.0, 720.0], [0.0, 720.0], [255, 255, 255, 255]);
+    list.textured_quad(
+        [0.0, 360.0],
+        [640.0, 360.0],
+        [640.0, 720.0],
+        [0.0, 720.0],
+        [255, 255, 255, 255],
+    );
     // Flat sentinel quad on the right half (must stay flat: sentinel UV).
-    list.quad([640.0, 0.0], [1280.0, 0.0], [1280.0, 360.0], [640.0, 360.0], [0, 200, 0, 255]);
-    let draw = HudDraw { screen: convert(&list), world: Default::default() };
-    r.render_capture(&feathered_chunk::MeshedChunk::default(), &sample_camera(), 0);
+    list.quad(
+        [640.0, 0.0],
+        [1280.0, 0.0],
+        [1280.0, 360.0],
+        [640.0, 360.0],
+        [0, 200, 0, 255],
+    );
+    let draw = HudDraw {
+        screen: convert(&list),
+        world: Default::default(),
+    };
+    r.render_capture(
+        &feathered_chunk::MeshedChunk::default(),
+        &sample_camera(),
+        0,
+    );
     r.set_overlay(draw);
-    r.render_capture(&feathered_chunk::MeshedChunk::default(), &sample_camera(), 0);
+    r.render_capture(
+        &feathered_chunk::MeshedChunk::default(),
+        &sample_camera(),
+        0,
+    );
     let frame = r.capture_last_frame().expect("frame");
     let px = |x: u32, y: u32| {
         let i = ((y * W + x) * 4) as usize;
@@ -177,12 +214,13 @@ fn textured_quads_sample_the_logo() {
     assert!(tr.iter().all(|&c| c > 245), "white texels, got {tr:?}");
     // Flat half: green, unaffected by the texture.
     let flat = px(900, 180);
-    assert!(flat[1] > 180 && flat[0] < 30, "flat quad stays flat, got {flat:?}");
+    assert!(
+        flat[1] > 180 && flat[0] < 30,
+        "flat quad stays flat, got {flat:?}"
+    );
 }
 
-fn convert(
-    l: &feathered_client::overlay::TriList,
-) -> feathered_renderer::client_overlay::TriList {
+fn convert(l: &feathered_client::overlay::TriList) -> feathered_renderer::client_overlay::TriList {
     feathered_renderer::client_overlay::TriList {
         vertices: l
             .vertices

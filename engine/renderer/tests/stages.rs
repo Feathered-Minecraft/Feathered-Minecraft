@@ -11,9 +11,7 @@
 //! the GPU tests also exercise every shader module (terrain, lighting, post)
 //! — a WGSL syntax/type error fails these tests loudly.
 
-use feathered_renderer::{
-    sun_state, Camera, RenderQuality, RenderSettings, ShaderEffectConfig,
-};
+use feathered_renderer::{sun_state, Camera, RenderQuality, RenderSettings, ShaderEffectConfig};
 
 // ---------------------------------------------------------------------------
 // CPU stage math
@@ -42,8 +40,8 @@ fn exposure_ev100_formula_matches_noble_fixed_mode() {
     // S/100 folds the 12.5 calibration + 100 sensitivity constants.
     let cfg = ShaderEffectConfig::for_quality(RenderQuality::High);
     let e = cfg.exposure.expect("High preset carries exposure");
-    let expected = 2.0f32
-        .powf(-((e.f_stops * e.f_stops) * e.shutter_speed * (100.0 / e.iso)).log2());
+    let expected =
+        2.0f32.powf(-((e.f_stops * e.f_stops) * e.shutter_speed * (100.0 / e.iso)).log2());
     assert!((e.exposure_scale() - expected).abs() < 1e-6);
     // f/8, 1/125s, ISO 200 ⇒ EV≈12 ⇒ exposure ≈ 1/4000 (HDR sun ~40 is
     // brought into display range after the sky scale).
@@ -65,16 +63,25 @@ fn gerstner_water_has_zero_slope_at_peaks_and_valleys() {
 fn quality_ladder_scales_every_stage_monotonically() {
     let mut prev_shadow_res = 0;
     let mut prev_cloud_steps = 0;
-    for (i, q) in [RenderQuality::Low, RenderQuality::Medium, RenderQuality::High, RenderQuality::Ultra]
-        .into_iter()
-        .enumerate()
+    for (i, q) in [
+        RenderQuality::Low,
+        RenderQuality::Medium,
+        RenderQuality::High,
+        RenderQuality::Ultra,
+    ]
+    .into_iter()
+    .enumerate()
     {
         let cfg = ShaderEffectConfig::for_quality(q);
         match i {
             0 => {
-                assert!(cfg.shadows.is_none() && cfg.ssao.is_none()
-                    && cfg.atmosphere.is_none() && cfg.clouds.is_none()
-                    && cfg.post.is_none());
+                assert!(
+                    cfg.shadows.is_none()
+                        && cfg.ssao.is_none()
+                        && cfg.atmosphere.is_none()
+                        && cfg.clouds.is_none()
+                        && cfg.post.is_none()
+                );
             }
             1 => {
                 // Medium: deferred lighting with gentle water only.
@@ -121,11 +128,16 @@ fn validation_fixture() -> Option<(
     feathered_assets::atlas::Atlas,
     feathered_world::grid::World,
 )> {
-    for p in ["texture/assets", "../texture/assets", "../../texture/assets"] {
+    for p in [
+        "texture/assets",
+        "../texture/assets",
+        "../../texture/assets",
+    ] {
         let root = std::path::Path::new(p);
         if root.join("pack.mcmeta").exists() {
             let index = feathered_assets::pack::discover(root).ok()?;
-            let (pack, atlas, _stats) = feathered_assets::compiler::compile_pack(&index, false).ok()?;
+            let (pack, atlas, _stats) =
+                feathered_assets::compiler::compile_pack(&index, false).ok()?;
             let registry = feathered_world::Registry::from_compiled(pack);
             let world = build_scene(&registry);
             return Some((registry, atlas, world));
@@ -159,9 +171,14 @@ fn build_scene(registry: &feathered_world::Registry) -> feathered_world::grid::W
     world
 }
 
-fn headless(quality: RenderQuality, cfg: Option<ShaderEffectConfig>)
-    -> (feathered_renderer::Renderer, feathered_chunk::MeshedChunk, Camera)
-{
+fn headless(
+    quality: RenderQuality,
+    cfg: Option<ShaderEffectConfig>,
+) -> (
+    feathered_renderer::Renderer,
+    feathered_chunk::MeshedChunk,
+    Camera,
+) {
     let (registry, atlas, world) = validation_fixture().expect("26.3 pack available");
     let mesh = feathered_renderer::build_meshes(&world, &registry, &atlas);
     let light = feathered_world::LightGrid::compute(&world, &registry);
@@ -171,7 +188,10 @@ fn headless(quality: RenderQuality, cfg: Option<ShaderEffectConfig>)
         180,
         &atlas,
         feathered_renderer::build_anim_slots(&registry, &atlas),
-        RenderSettings { quality, shader_pack: None },
+        RenderSettings {
+            quality,
+            shader_pack: None,
+        },
     ));
     r.set_world_lighting(light, lit_mesh);
     if let Some(c) = cfg {
@@ -231,7 +251,10 @@ fn staged_pipeline_renders_lit_ground_sky_and_atmosphere() {
     // Ground (lower rows): lit stone under the deferred stage — the raw
     // stone albedo is 156-gray and the sun+ambient terms change it.
     let ground = px(&frame, W, W / 2, H - 96);
-    assert!(ground[0] > 40 && ground[0] < 245, "ground lit range, got {ground:?}");
+    assert!(
+        ground[0] > 40 && ground[0] < 245,
+        "ground lit range, got {ground:?}"
+    );
     // Not the untouched clear color.
     assert!((ground[0] as i32 - 158).abs() > 4 || (ground[2] as i32 - 255).abs() > 4);
 }
@@ -258,7 +281,10 @@ fn atmosphere_toggle_changes_the_sky() {
             diff += a[0].abs_diff(b[0]) as u32 + a[2].abs_diff(b[2]) as u32;
         }
     }
-    assert!(diff > 200, "atmosphere must measurably recolor the sky (diff={diff})");
+    assert!(
+        diff > 200,
+        "atmosphere must measurably recolor the sky (diff={diff})"
+    );
 }
 
 #[test]
@@ -302,19 +328,28 @@ fn shadows_darken_ground_beside_the_log() {
         save_png("target/stage-shadows-without.png", &lit, W, H);
         // Sampled row prints for quick eyeballing of where darkness lands.
         for y in [600u32, 640, 680] {
-            let row_a: Vec<String> = (0..W).step_by(160).map(|x| {
-                let p = px(&shadowed, W, x, y);
-                format!("{:3}", p[0])
-            }).collect();
-            let row_b: Vec<String> = (0..W).step_by(160).map(|x| {
-                let p = px(&lit, W, x, y);
-                format!("{:3}", p[0])
-            }).collect();
+            let row_a: Vec<String> = (0..W)
+                .step_by(160)
+                .map(|x| {
+                    let p = px(&shadowed, W, x, y);
+                    format!("{:3}", p[0])
+                })
+                .collect();
+            let row_b: Vec<String> = (0..W)
+                .step_by(160)
+                .map(|x| {
+                    let p = px(&lit, W, x, y);
+                    format!("{:3}", p[0])
+                })
+                .collect();
             println!("y={y} WITH={}", row_a.join(" "));
             println!("y={y} W/O ={}", row_b.join(" "));
         }
     }
-    assert!(min_diff < -12, "shadows must darken ground (min_diff={min_diff})");
+    assert!(
+        min_diff < -12,
+        "shadows must darken ground (min_diff={min_diff})"
+    );
 }
 
 #[test]
@@ -335,10 +370,15 @@ fn water_surface_reflects_and_ripples() {
         for x in (760..1180).step_by(16) {
             let a = px(&with_water, W, x, y);
             let b = px(&flat, W, x, y);
-            diff += a[0].abs_diff(b[0]) as u32 + a[1].abs_diff(b[1]) as u32 + a[2].abs_diff(b[2]) as u32;
+            diff += a[0].abs_diff(b[0]) as u32
+                + a[1].abs_diff(b[1]) as u32
+                + a[2].abs_diff(b[2]) as u32;
         }
     }
-    assert!(diff > 500, "water stage must alter the pool region (diff={diff})");
+    assert!(
+        diff > 500,
+        "water stage must alter the pool region (diff={diff})"
+    );
 }
 
 #[test]
@@ -353,7 +393,10 @@ fn low_preset_renders_half_res_direct_path() {
     assert_eq!(r.frame_size(), (1280, 720));
     let frame = r.capture_last_frame().unwrap();
     let ground = px(&frame, 1280, 640, 690);
-    assert!(ground[0] > 30, "low path must still draw the scene, got {ground:?}");
+    assert!(
+        ground[0] > 30,
+        "low path must still draw the scene, got {ground:?}"
+    );
     // Row order: with the camera pitched down, sky is UP and stone ground is
     // DOWN in the final image. A vertically mirrored upscale puts stone on
     // top (the regression this asserts against).
@@ -361,7 +404,10 @@ fn low_preset_renders_half_res_direct_path() {
     let bottom = px(&frame, 1280, 640, 700);
     let is_skyish = |p: [u8; 3]| p[2] > 200 && p[0] < 220 && p[2] - p[0] > 20;
     assert!(is_skyish(top), "top rows must be sky, got {top:?}");
-    assert!(!is_skyish(bottom), "bottom rows must be ground, got {bottom:?}");
+    assert!(
+        !is_skyish(bottom),
+        "bottom rows must be ground, got {bottom:?}"
+    );
 }
 
 #[test]

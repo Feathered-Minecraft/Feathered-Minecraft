@@ -61,11 +61,7 @@ fn settle(x: i64, from_y: i64, z: i64, solid: &SolidFn) -> Option<i64> {
 /// Bounded A* over walkable voxels (4-connected + straight drops).
 /// `None` when unreachable within the caps (callers treat that as "give up
 /// this tick" — the cooldown guarantees the world gets work done anyway).
-pub fn find_path(
-    start: [f32; 3],
-    goal: [f32; 3],
-    solid: &SolidFn,
-) -> Option<Path> {
+pub fn find_path(start: [f32; 3], goal: [f32; 3], solid: &SolidFn) -> Option<Path> {
     let t0 = std::time::Instant::now();
     let s = (
         start[0].floor() as i64,
@@ -85,7 +81,9 @@ pub fn find_path(
     };
     let (start3, goal3) = ((s.0, sy, s.2), (g.0, gy, g.2));
     if start3 == goal3 {
-        return Some(Path { waypoints: vec![goal] });
+        return Some(Path {
+            waypoints: vec![goal],
+        });
     }
 
     // A* over (x, y, z) with Manhattan heuristic. Open set as a Vec (small
@@ -162,7 +160,10 @@ pub fn find_path(
             };
             if let Some(o) = open.iter_mut().find(|o| o.pos == n) {
                 if tentative < o.g {
-                    *o = Node { parent: nodes.len(), ..*o };
+                    *o = Node {
+                        parent: nodes.len(),
+                        ..*o
+                    };
                     o.g = tentative;
                     o.f = tentative + manhattan(n, goal3);
                 }
@@ -450,27 +451,30 @@ pub fn look_around() -> Goal {
 /// Chase: when the player is within `sight` and the goal holds CHASE,
 /// re-path toward the player on a cooldown (scratch[0] = repath timer).
 pub fn chase(sight: f32, repath_interval: f32) -> Goal {
-    Goal::new(2, Controls(Controls::MOVE | Controls::CHASE | Controls::LOOK))
-        .on_can_start(move |c| c.player_dist.map(|d| d < sight).unwrap_or(false))
-        .on_start(|_c| {})
-        .on_tick(move |c| {
-            c.scratch[0] -= 1.0;
-            // Face the player every tick.
-            if let Some(d) = c.player_dist {
-                let _ = d;
+    Goal::new(
+        2,
+        Controls(Controls::MOVE | Controls::CHASE | Controls::LOOK),
+    )
+    .on_can_start(move |c| c.player_dist.map(|d| d < sight).unwrap_or(false))
+    .on_start(|_c| {})
+    .on_tick(move |c| {
+        c.scratch[0] -= 1.0;
+        // Face the player every tick.
+        if let Some(d) = c.player_dist {
+            let _ = d;
+        }
+        if c.scratch[0] <= 0.0 {
+            c.scratch[0] = repath_interval;
+            // The caller places the player's position in scratch[1..3].
+            let target = [c.scratch[1], c.mob.pos[1], c.scratch[2]];
+            if let Some(p) = find_path(c.mob.pos, target, c.solid) {
+                c.mob.move_target = p.waypoints.first().copied();
             }
-            if c.scratch[0] <= 0.0 {
-                c.scratch[0] = repath_interval;
-                // The caller places the player's position in scratch[1..3].
-                let target = [c.scratch[1], c.mob.pos[1], c.scratch[2]];
-                if let Some(p) = find_path(c.mob.pos, target, c.solid) {
-                    c.mob.move_target = p.waypoints.first().copied();
-                }
-            }
-        })
-        .on_continue(move |c| c.player_dist.map(|d| d < sight * 1.3).unwrap_or(false))
-        .on_stop(|c| c.mob.move_target = None)
-        .runs_every_tick()
+        }
+    })
+    .on_continue(move |c| c.player_dist.map(|d| d < sight * 1.3).unwrap_or(false))
+    .on_stop(|c| c.mob.move_target = None)
+    .runs_every_tick()
 }
 
 /// Melee: when the player is within reach, "hit" — the host applies damage

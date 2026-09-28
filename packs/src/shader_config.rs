@@ -20,8 +20,8 @@
 
 use crate::shader::ShaderLayout;
 use feathered_renderer::{
-    AoConfig, AtmosphereConfig, ExposureConfig, FogConfig, PostConfig,
-    RenderQuality, ShaderEffectConfig, ShadowConfig, Tonemap,
+    AoConfig, AtmosphereConfig, ExposureConfig, FogConfig, PostConfig, RenderQuality,
+    ShaderEffectConfig, ShadowConfig, Tonemap,
 };
 use std::collections::HashMap;
 use std::path::Path;
@@ -65,9 +65,14 @@ fn load_properties(pack_dir: &Path) -> Option<(HashMap<String, String>, ShaderLa
 
 fn detect_layout(pack_dir: &Path) -> ShaderLayout {
     let s = pack_dir.join("shaders");
-    let has = |pat: &str| std::fs::read_dir(&s)
-        .map(|rd| rd.filter_map(|e| e.ok()).any(|e| e.path().extension().is_some_and(|x| x == pat)))
-        .unwrap_or(false);
+    let has = |pat: &str| {
+        std::fs::read_dir(&s)
+            .map(|rd| {
+                rd.filter_map(|e| e.ok())
+                    .any(|e| e.path().extension().is_some_and(|x| x == pat))
+            })
+            .unwrap_or(false)
+    };
     if has("fsh") || has("vsh") {
         ShaderLayout::OptifineStyle
     } else if has("glsl") || has("gsh") {
@@ -105,10 +110,26 @@ pub fn translate_shader_config(
 
     // Recognized-but-untranslatable (documented, never faked).
     const KNOWN_UNSUPPORTED: &[&str] = &[
-        "TAA", "DOF", "POM", "POM_LAYERS", "POM_DISTANCE", "POM_SHADOWING",
-        "CLOUDS_SHADOWS", "WATER_CAUSTICS", "WATER_PARALLAX", "SSR",
-        "LENS_FLARES", "GLARE", "PALETTE", "LUT", "CEL_SHADING", "FILM_GRAIN",
-        "LABPBR", "SUBSURFACE_SCATTERING", "DH_SHADOWS", "RAIN_PUDDLES",
+        "TAA",
+        "DOF",
+        "POM",
+        "POM_LAYERS",
+        "POM_DISTANCE",
+        "POM_SHADOWING",
+        "CLOUDS_SHADOWS",
+        "WATER_CAUSTICS",
+        "WATER_PARALLAX",
+        "SSR",
+        "LENS_FLARES",
+        "GLARE",
+        "PALETTE",
+        "LUT",
+        "CEL_SHADING",
+        "FILM_GRAIN",
+        "LABPBR",
+        "SUBSURFACE_SCATTERING",
+        "DH_SHADOWS",
+        "RAIN_PUDDLES",
     ];
 
     let get = |k: &str| props.get(k);
@@ -131,11 +152,17 @@ pub fn translate_shader_config(
             RenderQuality::Ultra => &["ULTRA"],
         };
         want.iter()
-            .find_map(|w| props.keys().find(|k| k.eq_ignore_ascii_case(&format!("profile.{w}"))))
+            .find_map(|w| {
+                props
+                    .keys()
+                    .find(|k| k.eq_ignore_ascii_case(&format!("profile.{w}")))
+            })
             .map(|k| k.trim_start_matches("profile.").to_string())
             .or_else(|| {
                 // First declared profile (BTreeMap iteration order = lexical).
-                declared.first().map(|k| k.trim_start_matches("profile.").to_string())
+                declared
+                    .first()
+                    .map(|k| k.trim_start_matches("profile.").to_string())
             })
     });
     if let Some(sel) = selection {
@@ -230,7 +257,10 @@ pub fn translate_shader_config(
     }
     if let Some(true) = b(g("AIR_FOG")) {
         if cfg.fog.is_none() {
-            cfg.fog = Some(FogConfig { density: 0.002, tint: [0.9, 0.95, 1.0] });
+            cfg.fog = Some(FogConfig {
+                density: 0.002,
+                tint: [0.9, 0.95, 1.0],
+            });
         }
         if let Some(d) = f(g("FOG_DENSITY")) {
             cfg.fog.as_mut().unwrap().density = (d * 0.01).clamp(0.0, 0.05);
@@ -243,9 +273,15 @@ pub fn translate_shader_config(
     // A pack configuring any post knob gets the stage even if the base
     // preset renders without post (Medium/Low) — otherwise BLOOM=1 would be
     // silently dropped.
-    let post_requested = ["BLOOM", "BLOOM_STRENGTH", "VIGNETTE", "VIGNETTE_STRENGTH", "TONEMAP"]
-        .iter()
-        .any(|k| effective.contains_key(*k));
+    let post_requested = [
+        "BLOOM",
+        "BLOOM_STRENGTH",
+        "VIGNETTE",
+        "VIGNETTE_STRENGTH",
+        "TONEMAP",
+    ]
+    .iter()
+    .any(|k| effective.contains_key(*k));
     if cfg.post.is_none() && post_requested {
         cfg.post = Some(PostConfig {
             bloom: false,
@@ -312,19 +348,51 @@ pub fn translate_shader_config(
 /// reported as unknown rather than silently dropped).
 fn is_recognized(key: &str) -> bool {
     const RECOGNIZED: &[&str] = &[
-        "profile", "sun", "moon", "clouds", "separateAo", "vignette", "oldLighting",
-        "oldHandLight", "underwaterOverlay", "dynamicHandLight",
-        "SHADOWS", "SHADOW_SAMPLES", "shadowMapResolution", "shadowDistance",
-        "AO", "AO_SCALE",
-        "sunPathRotation", "ATMOSPHERE",
-        "CLOUDS_LAYER0_ENABLED", "CLOUDS_LAYER1_ENABLED", "CLOUDS_LAYER0_ALTITUDE",
-        "CLOUDS_LAYER0_COVERAGE", "CLOUDS_LAYER0_SCATTERING_STEPS",
-        "WATER_OCTAVES", "WAVE_AMPLITUDE", "AIR_FOG", "FOG_DENSITY",
-        "BLOOM", "BLOOM_STRENGTH", "VIGNETTE", "VIGNETTE_STRENGTH", "TONEMAP",
-        "F_STOPS", "ISO", "SHUTTER_SPEED", "EXPOSURE",
-        "RENDER_SCALE_OPTION", "ATMOSPHERE_SCALE", "ATMOSPHERE_SCATTERING_STEPS",
-        "ATMOSPHERE_TRANSMITTANCE_STEPS", "CLOUDS_SCALE", "REFLECTIONS",
-        "REFLECTIONS_SCALE", "REFLECTIONS_STRIDE", "REFRACTIONS",
+        "profile",
+        "sun",
+        "moon",
+        "clouds",
+        "separateAo",
+        "vignette",
+        "oldLighting",
+        "oldHandLight",
+        "underwaterOverlay",
+        "dynamicHandLight",
+        "SHADOWS",
+        "SHADOW_SAMPLES",
+        "shadowMapResolution",
+        "shadowDistance",
+        "AO",
+        "AO_SCALE",
+        "sunPathRotation",
+        "ATMOSPHERE",
+        "CLOUDS_LAYER0_ENABLED",
+        "CLOUDS_LAYER1_ENABLED",
+        "CLOUDS_LAYER0_ALTITUDE",
+        "CLOUDS_LAYER0_COVERAGE",
+        "CLOUDS_LAYER0_SCATTERING_STEPS",
+        "WATER_OCTAVES",
+        "WAVE_AMPLITUDE",
+        "AIR_FOG",
+        "FOG_DENSITY",
+        "BLOOM",
+        "BLOOM_STRENGTH",
+        "VIGNETTE",
+        "VIGNETTE_STRENGTH",
+        "TONEMAP",
+        "F_STOPS",
+        "ISO",
+        "SHUTTER_SPEED",
+        "EXPOSURE",
+        "RENDER_SCALE_OPTION",
+        "ATMOSPHERE_SCALE",
+        "ATMOSPHERE_SCATTERING_STEPS",
+        "ATMOSPHERE_TRANSMITTANCE_STEPS",
+        "CLOUDS_SCALE",
+        "REFLECTIONS",
+        "REFLECTIONS_SCALE",
+        "REFLECTIONS_STRIDE",
+        "REFRACTIONS",
     ];
     // profile.<name> lines are consumed by the profile expander.
     key.starts_with("profile.") || RECOGNIZED.iter().any(|k| k.eq_ignore_ascii_case(key))

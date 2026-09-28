@@ -402,10 +402,26 @@ impl OverlayState {
         array_stride: 32,
         step_mode: wgpu::VertexStepMode::Vertex,
         attributes: &[
-            wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 0, shader_location: 0 },
-            wgpu::VertexAttribute { format: wgpu::VertexFormat::Unorm8x4, offset: 12, shader_location: 1 },
-            wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x2, offset: 16, shader_location: 2 },
-            wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x2, offset: 24, shader_location: 3 },
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x3,
+                offset: 0,
+                shader_location: 0,
+            },
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Unorm8x4,
+                offset: 12,
+                shader_location: 1,
+            },
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x2,
+                offset: 16,
+                shader_location: 2,
+            },
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x2,
+                offset: 24,
+                shader_location: 3,
+            },
         ],
     };
 
@@ -541,7 +557,11 @@ impl OverlayState {
             // the expanded beam visible without shadow-acne flicker.
             depth_compare: Some(wgpu::CompareFunction::LessEqual),
             stencil: Default::default(),
-            bias: wgpu::DepthBiasState { constant: -1, slope_scale: -1.0, clamp: 0.0 },
+            bias: wgpu::DepthBiasState {
+                constant: -1,
+                slope_scale: -1.0,
+                clamp: 0.0,
+            },
         });
 
         // Screen pipelines are built below with the texture bind group (the
@@ -588,7 +608,11 @@ impl OverlayState {
         let logo_view = device
             .create_texture(&wgpu::TextureDescriptor {
                 label: Some("overlay-logo-fallback"),
-                size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
@@ -647,21 +671,35 @@ impl OverlayState {
             label: Some("overlay-tex-bg"),
             layout: &tex_bgl,
             entries: &[
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&logo_view) },
-                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&logo_sampler) },
-                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&bg_view) },
-                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::Sampler(&bg_sampler) },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&logo_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&logo_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(&bg_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::Sampler(&bg_sampler),
+                },
             ],
         });
         // Rebuild the screen pipelines: their layout now includes the texture
         // bind group (module is recompiled from the same WGSL source).
         let screen_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("overlay-screen-tex"),
-            layout: Some(&device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("overlay-screen-tex-pl"),
-                bind_group_layouts: &[Some(&screen_params_bgl), Some(&tex_bgl)],
-                immediate_size: 0,
-            })),
+            layout: Some(
+                &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("overlay-screen-tex-pl"),
+                    bind_group_layouts: &[Some(&screen_params_bgl), Some(&tex_bgl)],
+                    immediate_size: 0,
+                }),
+            ),
             vertex: wgpu::VertexState {
                 module: &module,
                 entry_point: Some("vs_screen"),
@@ -688,39 +726,42 @@ impl OverlayState {
             multiview_mask: None,
             cache: None,
         });
-        let screen_pipeline_capture = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("overlay-screen-tex-capture"),
-            layout: Some(&device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("overlay-screen-tex-capture-pl"),
-                bind_group_layouts: &[Some(&screen_params_bgl), Some(&tex_bgl)],
-                immediate_size: 0,
-            })),
-            vertex: wgpu::VertexState {
-                module: &module,
-                entry_point: Some("vs_screen"),
-                buffers: &[Some(Self::OVERLAY_VBUF_LAYOUT)],
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &module,
-                entry_point: Some("fs"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: capture_format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: Default::default(),
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                cull_mode: None,
-                ..Default::default()
-            },
-            depth_stencil: None,
-            multisample: Default::default(),
-            multiview_mask: None,
-            cache: None,
-        });
+        let screen_pipeline_capture =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("overlay-screen-tex-capture"),
+                layout: Some(
+                    &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                        label: Some("overlay-screen-tex-capture-pl"),
+                        bind_group_layouts: &[Some(&screen_params_bgl), Some(&tex_bgl)],
+                        immediate_size: 0,
+                    }),
+                ),
+                vertex: wgpu::VertexState {
+                    module: &module,
+                    entry_point: Some("vs_screen"),
+                    buffers: &[Some(Self::OVERLAY_VBUF_LAYOUT)],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &module,
+                    entry_point: Some("fs"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: capture_format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    cull_mode: None,
+                    ..Default::default()
+                },
+                depth_stencil: None,
+                multisample: Default::default(),
+                multiview_mask: None,
+                cache: None,
+            });
         OverlayState {
             screen_params_buf,
             screen_bind,
@@ -756,10 +797,22 @@ impl OverlayState {
             label: Some("overlay-tex-bg"),
             layout: &self.tex_bgl,
             entries: &[
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&self.logo_view) },
-                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&self.logo_sampler) },
-                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(view) },
-                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::Sampler(&self.bg_sampler) },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&self.logo_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&self.logo_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::Sampler(&self.bg_sampler),
+                },
             ],
         });
     }
@@ -820,9 +873,25 @@ impl OverlayState {
             outline_count,
             ..
         } = self;
-        Self::grow_and_upload(device, queue, screen, screen_vbuf, screen_ibuf, screen_vcap, screen_icap);
+        Self::grow_and_upload(
+            device,
+            queue,
+            screen,
+            screen_vbuf,
+            screen_ibuf,
+            screen_vcap,
+            screen_icap,
+        );
         *screen_count = screen.indices.len() as u32;
-        Self::grow_and_upload(device, queue, outline, outline_vbuf, outline_ibuf, outline_vcap, outline_icap);
+        Self::grow_and_upload(
+            device,
+            queue,
+            outline,
+            outline_vbuf,
+            outline_ibuf,
+            outline_vcap,
+            outline_icap,
+        );
         *outline_count = outline.indices.len() as u32;
     }
 }
@@ -834,7 +903,11 @@ impl OverlayState {
 pub fn sun_state(sun_angle: f32, rotation_deg: f32) -> ([f32; 3], f32) {
     let theta = sun_angle * std::f32::consts::TAU; // 0 = sunrise, 0.25 = noon
     let rot = rotation_deg.to_radians();
-    let d = [theta.cos(), theta.sin() * rot.cos(), theta.sin() * rot.sin()];
+    let d = [
+        theta.cos(),
+        theta.sin() * rot.cos(),
+        theta.sin() * rot.sin(),
+    ];
     let d = n3(d);
     (d, d[1])
 }
@@ -980,9 +1053,7 @@ impl Renderer {
         settings: RenderSettings,
     ) -> Renderer {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-        let surface = instance
-            .create_surface(window)
-            .expect("create surface");
+        let surface = instance.create_surface(window).expect("create surface");
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::HighPerformance,
@@ -1024,7 +1095,15 @@ impl Renderer {
             desired_maximum_frame_latency: 2,
         };
         Self::construct_tail(
-            device, queue, Some(surface), surface_config, atlas, anims, settings, width, height,
+            device,
+            queue,
+            Some(surface),
+            surface_config,
+            atlas,
+            anims,
+            settings,
+            width,
+            height,
         )
     }
 
@@ -1165,11 +1244,31 @@ impl Renderer {
             array_stride: std::mem::size_of::<Vertex>() as u64,
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &[
-                wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 0, shader_location: 0 },
-                wgpu::VertexAttribute { format: wgpu::VertexFormat::Unorm16x2, offset: 12, shader_location: 1 },
-                wgpu::VertexAttribute { format: wgpu::VertexFormat::Unorm8x4, offset: 16, shader_location: 2 },
-                wgpu::VertexAttribute { format: wgpu::VertexFormat::Uint8x2, offset: 20, shader_location: 3 },
-                wgpu::VertexAttribute { format: wgpu::VertexFormat::Unorm8x2, offset: 22, shader_location: 4 },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x3,
+                    offset: 0,
+                    shader_location: 0,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Unorm16x2,
+                    offset: 12,
+                    shader_location: 1,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Unorm8x4,
+                    offset: 16,
+                    shader_location: 2,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Uint8x2,
+                    offset: 20,
+                    shader_location: 3,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Unorm8x2,
+                    offset: 22,
+                    shader_location: 4,
+                },
             ],
         })];
 
@@ -1415,14 +1514,26 @@ impl Renderer {
             desired_maximum_frame_latency: 2,
         };
         Self::construct_tail(
-            device, queue, None, surface_config, atlas, anims, settings, width, height,
+            device,
+            queue,
+            None,
+            surface_config,
+            atlas,
+            anims,
+            settings,
+            width,
+            height,
         )
     }
 
     fn make_depth(device: &wgpu::Device, w: u32, h: u32) -> wgpu::Texture {
         device.create_texture(&wgpu::TextureDescriptor {
             label: Some("depth"),
-            size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -1451,10 +1562,13 @@ impl Renderer {
         self.tick = tick;
         let Some(surface) = &self.surface else { return };
         let frame = match surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
+            wgpu::CurrentSurfaceTexture::Success(t)
+            | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
             _ => return, // skip frame; window state changed
         };
-        let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let view = frame
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
         let (fw, fh) = (frame.texture.width(), frame.texture.height());
         if (fw, fh) != self.depth_size {
             let depth = Self::make_depth(&self.device, fw, fh);
@@ -1466,13 +1580,19 @@ impl Renderer {
             view_proj: camera.view_proj(),
             anim_offsets: self.animation_offsets(tick),
         };
-        self.queue.write_buffer(&self.globals_buf, 0, bytemuck::bytes_of(&globals));
         self.queue
-            .write_buffer(&self.post_params_buf, 0, bytemuck::bytes_of(&self.post_params()));
+            .write_buffer(&self.globals_buf, 0, bytemuck::bytes_of(&globals));
+        self.queue.write_buffer(
+            &self.post_params_buf,
+            0,
+            bytemuck::bytes_of(&self.post_params()),
+        );
 
         let mut encoder = self
             .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("frame") });
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("frame"),
+            });
         self.record_frame(&mut encoder, meshes, camera, tick, &view, true);
         self.queue.submit([encoder.finish()]);
         self.queue.present(frame);
@@ -1492,7 +1612,11 @@ impl Renderer {
 
         let color = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("capture-color"),
-            size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -1506,13 +1630,19 @@ impl Renderer {
             view_proj: camera.view_proj(),
             anim_offsets: self.animation_offsets(tick),
         };
-        self.queue.write_buffer(&self.globals_buf, 0, bytemuck::bytes_of(&globals));
         self.queue
-            .write_buffer(&self.post_params_buf, 0, bytemuck::bytes_of(&self.post_params()));
+            .write_buffer(&self.globals_buf, 0, bytemuck::bytes_of(&globals));
+        self.queue.write_buffer(
+            &self.post_params_buf,
+            0,
+            bytemuck::bytes_of(&self.post_params()),
+        );
 
         let mut encoder = self
             .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("capture") });
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("capture"),
+            });
         self.record_frame(&mut encoder, meshes, camera, tick, &color_view, false);
 
         encoder.copy_texture_to_buffer(
@@ -1525,7 +1655,11 @@ impl Renderer {
                     rows_per_image: Some(h),
                 },
             },
-            wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
         );
         self.queue.submit([encoder.finish()]);
 
@@ -1536,7 +1670,9 @@ impl Renderer {
         });
         let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
         if let Ok(Ok(())) = rx.recv_timeout(std::time::Duration::from_secs(10)) {
-            let Ok(data) = slice.get_mapped_range() else { return };
+            let Ok(data) = slice.get_mapped_range() else {
+                return;
+            };
             let mut out = Vec::with_capacity((w * h * 4) as usize);
             for row in 0..h {
                 let start = (row * bytes_per_row) as usize;
@@ -1635,9 +1771,7 @@ impl Renderer {
             return;
         }
 
-        if self.settings.quality.post_process()
-            || self.settings.quality.render_scale() < 1.0
-        {
+        if self.settings.quality.post_process() || self.settings.quality.render_scale() < 1.0 {
             let (fw, fh) = self.frame_dims(to_window);
             let (sw, sh) = self.scene_size_fw_fh(fw, fh);
             self.ensure_scene(sw.max(64), sh.max(64));
@@ -1744,30 +1878,58 @@ impl Renderer {
         };
         let (sun, elev) = sun_state(sun_angle, config.sun_path_rotation_deg);
         let mut flags = 0u32;
-        if config.ssao.is_some() { flags |= effect_flags::SSAO; }
-        if config.shadows.is_some() { flags |= effect_flags::SHADOWS; }
-        if config.atmosphere.is_some() { flags |= effect_flags::ATMOSPHERE; }
-        if config.water.is_some() { flags |= effect_flags::WATER; }
-        if config.fog.is_some() { flags |= effect_flags::FOG; }
+        if config.ssao.is_some() {
+            flags |= effect_flags::SSAO;
+        }
+        if config.shadows.is_some() {
+            flags |= effect_flags::SHADOWS;
+        }
+        if config.atmosphere.is_some() {
+            flags |= effect_flags::ATMOSPHERE;
+        }
+        if config.water.is_some() {
+            flags |= effect_flags::WATER;
+        }
+        if config.fog.is_some() {
+            flags |= effect_flags::FOG;
+        }
 
         let lparams = LightingParams {
             flags: [
                 flags,
-                config.shadows.as_ref().map(|s| s.samples.min(16)).unwrap_or(0),
-                match config.post.as_ref().map(|p| p.tonemap).unwrap_or(Tonemap::None) {
+                config
+                    .shadows
+                    .as_ref()
+                    .map(|s| s.samples.min(16))
+                    .unwrap_or(0),
+                match config
+                    .post
+                    .as_ref()
+                    .map(|p| p.tonemap)
+                    .unwrap_or(Tonemap::None)
+                {
                     Tonemap::None => 0,
                     Tonemap::Aces => 1,
                     Tonemap::Reinhard => 2,
                 },
                 0,
             ],
-            camera: [camera.pos[0], camera.pos[1], camera.pos[2], tick as f32 / 20.0],
+            camera: [
+                camera.pos[0],
+                camera.pos[1],
+                camera.pos[2],
+                tick as f32 / 20.0,
+            ],
             // daylight rides in atmosphere.w (ambient strength): dusk/night
             // dims ambient so the world darkens smoothly.
             sun_dir: [sun[0], sun[1], sun[2], elev],
             atmosphere: [
                 config.atmosphere.as_ref().map(|a| a.mie_g).unwrap_or(0.76),
-                config.atmosphere.as_ref().map(|a| a.sun_illuminance).unwrap_or(30.0),
+                config
+                    .atmosphere
+                    .as_ref()
+                    .map(|a| a.sun_illuminance)
+                    .unwrap_or(30.0),
                 ambient_for_sun(elev),
                 0.0,
             ],
@@ -1779,7 +1941,14 @@ impl Renderer {
             water: config
                 .water
                 .as_ref()
-                .map(|w| [w.octaves as f32, w.amplitude, w.speed, w.reflection_strength])
+                .map(|w| {
+                    [
+                        w.octaves as f32,
+                        w.amplitude,
+                        w.speed,
+                        w.reflection_strength,
+                    ]
+                })
                 .unwrap_or([4.0, 0.5, 1.0, 0.6]),
             absorption: config
                 .water
@@ -1850,7 +2019,8 @@ impl Renderer {
             let s = self.staged.as_ref().unwrap();
             (s.lighting_params_buf.clone(), s.shadow_params_buf.clone())
         };
-        self.queue.write_buffer(&params_buf, 0, bytemuck::bytes_of(&lparams));
+        self.queue
+            .write_buffer(&params_buf, 0, bytemuck::bytes_of(&lparams));
 
         // --- Shadow map pass ----------------------------------------------
         if let Some(sh) = &config.shadows {
@@ -1859,7 +2029,8 @@ impl Renderer {
                 sun_view_proj: sun_vp,
                 config: [extent, 0.0022, sh.strength, 0.0],
             };
-            self.queue.write_buffer(&shadow_buf, 0, bytemuck::bytes_of(&sparams));
+            self.queue
+                .write_buffer(&shadow_buf, 0, bytemuck::bytes_of(&sparams));
             // vs_shadow transforms through globals.view_proj — bind the SUN's
             // ortho matrix for this pass (animation offsets irrelevant: the
             // shadow fragment only tests alpha coverage).
@@ -1911,16 +2082,20 @@ impl Renderer {
                     if layer.indices.is_empty() {
                         continue;
                     }
-                    let vbuf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: None,
-                        contents: bytemuck::cast_slice(&layer.vertices),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    });
-                    let ibuf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: None,
-                        contents: bytemuck::cast_slice(&layer.indices),
-                        usage: wgpu::BufferUsages::INDEX,
-                    });
+                    let vbuf = self
+                        .device
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: None,
+                            contents: bytemuck::cast_slice(&layer.vertices),
+                            usage: wgpu::BufferUsages::VERTEX,
+                        });
+                    let ibuf = self
+                        .device
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: None,
+                            contents: bytemuck::cast_slice(&layer.indices),
+                            usage: wgpu::BufferUsages::INDEX,
+                        });
                     spass.set_pipeline(&shadow_pipe);
                     spass.set_bind_group(1, &gbuffer.atlas_bind, &[]);
                     spass.set_vertex_buffer(0, vbuf.slice(..));
@@ -1934,13 +2109,22 @@ impl Renderer {
         {
             let (albedo_view, lightmap_view, depth_view) = {
                 let s = self.scene.as_ref().unwrap();
-                (s.albedo_view.clone(), s.lightmap_view.clone(), s.depth_view.clone())
+                (
+                    s.albedo_view.clone(),
+                    s.lightmap_view.clone(),
+                    s.depth_view.clone(),
+                )
             };
             let color_atts = [
                 Some(Self::color_attachment_clear(&albedo_view, Self::SKY)),
                 Some(Self::color_attachment_clear(
                     &lightmap_view,
-                    wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 },
+                    wgpu::Color {
+                        r: 0.0,
+                        g: 0.0,
+                        b: 0.0,
+                        a: 0.0,
+                    },
                 )),
             ];
             let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1980,16 +2164,20 @@ impl Renderer {
                 if layer.indices.is_empty() {
                     continue;
                 }
-                let vbuf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: None,
-                    contents: bytemuck::cast_slice(&layer.vertices),
-                    usage: wgpu::BufferUsages::VERTEX,
-                });
-                let ibuf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: None,
-                    contents: bytemuck::cast_slice(&layer.indices),
-                    usage: wgpu::BufferUsages::INDEX,
-                });
+                let vbuf = self
+                    .device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: None,
+                        contents: bytemuck::cast_slice(&layer.vertices),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    });
+                let ibuf = self
+                    .device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: None,
+                        contents: bytemuck::cast_slice(&layer.indices),
+                        usage: wgpu::BufferUsages::INDEX,
+                    });
                 rpass.set_pipeline(pipe);
                 rpass.set_bind_group(1, &gbuffer.atlas_bind, &[]);
                 rpass.set_vertex_buffer(0, vbuf.slice(..));
@@ -2010,7 +2198,12 @@ impl Renderer {
         let lit_view = self.scene.as_ref().unwrap().lit_view.clone();
         let color_atts = [Some(Self::color_attachment_clear(
             &lit_view,
-            wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 1.0 },
+            wgpu::Color {
+                r: 0.0,
+                g: 0.0,
+                b: 0.0,
+                a: 1.0,
+            },
         ))];
         let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("deferred-lighting"),
@@ -2046,16 +2239,20 @@ impl Renderer {
             if layer.indices.is_empty() {
                 continue;
             }
-            let vbuf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: None,
-                contents: bytemuck::cast_slice(&layer.vertices),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-            let ibuf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: None,
-                contents: bytemuck::cast_slice(&layer.indices),
-                usage: wgpu::BufferUsages::INDEX,
-            });
+            let vbuf = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: None,
+                    contents: bytemuck::cast_slice(&layer.vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+            let ibuf = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: None,
+                    contents: bytemuck::cast_slice(&layer.indices),
+                    usage: wgpu::BufferUsages::INDEX,
+                });
             rpass.set_pipeline(pipe);
             rpass.set_bind_group(1, &pipes.atlas_bind, &[]);
             rpass.set_vertex_buffer(0, vbuf.slice(..));
@@ -2083,7 +2280,12 @@ impl Renderer {
         }
     }
 
-    const SKY: wgpu::Color = wgpu::Color { r: 0.62, g: 0.8, b: 1.0, a: 1.0 };
+    const SKY: wgpu::Color = wgpu::Color {
+        r: 0.62,
+        g: 0.8,
+        b: 1.0,
+        a: 1.0,
+    };
 
     /// Draw the pending overlay: world-space outlines first (depth-tested
     /// against the scene depth) inside their own pass, then the screen-space
@@ -2095,7 +2297,9 @@ impl Renderer {
         depth_view: Option<&wgpu::TextureView>,
         to_window: bool,
     ) {
-        let Some(pending) = self.pending_overlay.take() else { return };
+        let Some(pending) = self.pending_overlay.take() else {
+            return;
+        };
         let (fw, fh) = self.frame_dims(to_window);
         let Some(ov) = &mut self.overlay else { return };
         // Screen-size uniform (UI px → NDC); zw slots unused.
@@ -2123,14 +2327,16 @@ impl Renderer {
                 label: Some("overlay-outline"),
                 multiview_mask: None,
                 color_attachments: &[Some(Self::color_attachment_load(target))],
-                depth_stencil_attachment: depth_view.map(|v| wgpu::RenderPassDepthStencilAttachment {
-                    view: v,
-                    // Load the scene depth (test against the world); no writes.
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    }),
-                    stencil_ops: None,
+                depth_stencil_attachment: depth_view.map(|v| {
+                    wgpu::RenderPassDepthStencilAttachment {
+                        view: v,
+                        // Load the scene depth (test against the world); no writes.
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    }
                 }),
                 timestamp_writes: None,
                 occlusion_query_set: None,
@@ -2181,7 +2387,9 @@ impl Renderer {
     }
 
     /// Color attachment that LOADS the previous content (overlay passes).
-    fn color_attachment_load<'a>(view: &'a wgpu::TextureView) -> wgpu::RenderPassColorAttachment<'a> {
+    fn color_attachment_load<'a>(
+        view: &'a wgpu::TextureView,
+    ) -> wgpu::RenderPassColorAttachment<'a> {
         wgpu::RenderPassColorAttachment {
             view,
             resolve_target: None,
@@ -2210,7 +2418,9 @@ impl Renderer {
     }
 
     /// Shared depth attachment.
-    fn depth_attachment<'a>(view: &'a wgpu::TextureView) -> wgpu::RenderPassDepthStencilAttachment<'a> {
+    fn depth_attachment<'a>(
+        view: &'a wgpu::TextureView,
+    ) -> wgpu::RenderPassDepthStencilAttachment<'a> {
         wgpu::RenderPassDepthStencilAttachment {
             view,
             depth_ops: Some(wgpu::Operations {
@@ -2230,21 +2440,24 @@ impl Renderer {
         let mk = |label: &'static str, fmt: wgpu::TextureFormat| {
             self.device.create_texture(&wgpu::TextureDescriptor {
                 label: Some(label),
-                size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+                size: wgpu::Extent3d {
+                    width: w,
+                    height: h,
+                    depth_or_array_layers: 1,
+                },
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
                 format: fmt,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_SRC,
                 view_formats: &[],
             })
         };
         let albedo = mk("gbuffer-albedo", wgpu::TextureFormat::Rgba8UnormSrgb);
         let lightmap = mk("gbuffer-lightmap", wgpu::TextureFormat::Rgba8Unorm);
-        let lit = mk(
-            "lit-color",
-            wgpu::TextureFormat::Rgba8UnormSrgb,
-        );
+        let lit = mk("lit-color", wgpu::TextureFormat::Rgba8UnormSrgb);
         let albedo_view = albedo.create_view(&wgpu::TextureViewDescriptor::default());
         let lightmap_view = lightmap.create_view(&wgpu::TextureViewDescriptor::default());
         let lit_view = lit.create_view(&wgpu::TextureViewDescriptor::default());
@@ -2253,7 +2466,11 @@ impl Renderer {
         // cannot be texture-sampled as float on all backends.
         let depth = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("scene-depth"),
-            size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -2296,7 +2513,9 @@ impl Renderer {
 
     /// (Re)build the lighting-stage bind group against the current targets.
     fn ensure_lighting_bind(&mut self) {
-        let Some(staged) = &mut self.staged else { return };
+        let Some(staged) = &mut self.staged else {
+            return;
+        };
         if staged.lighting_bind.is_some() {
             return;
         }
@@ -2314,14 +2533,38 @@ impl Renderer {
             label: Some("lighting-bg"),
             layout: &layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: params.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&albedo_view) },
-                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&depth_view) },
-                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::Sampler(&post_sampler) },
-                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(&lightmap_view) },
-                wgpu::BindGroupEntry { binding: 5, resource: shadow_params.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureView(&shadow_view) },
-                wgpu::BindGroupEntry { binding: 7, resource: wgpu::BindingResource::Sampler(&shadow_sampler) },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: params.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&albedo_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&depth_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::Sampler(&post_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::TextureView(&lightmap_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: shadow_params.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::TextureView(&shadow_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: wgpu::BindingResource::Sampler(&shadow_sampler),
+                },
             ],
         });
         if let Some(staged) = &mut self.staged {
@@ -2339,9 +2582,18 @@ impl Renderer {
             label: Some("post-bg-lit"),
             layout: &layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: params.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&lit_view) },
-                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&sampler) },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: params.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&lit_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
             ],
         });
         self.post_bind_group = Some(bg);
@@ -2358,9 +2610,18 @@ impl Renderer {
                 label: Some("post-bg"),
                 layout: &layout,
                 entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: params.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&view) },
-                    wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&sampler) },
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: params.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(&view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Sampler(&sampler),
+                    },
                 ],
             });
             self.post_bind_group = Some(bg);
@@ -2374,7 +2635,9 @@ impl Renderer {
         target: &wgpu::TextureView,
         pipeline: &wgpu::RenderPipeline,
     ) {
-        let Some(bind) = &self.post_bind_group else { return };
+        let Some(bind) = &self.post_bind_group else {
+            return;
+        };
         let color_atts = [Some(Self::color_attachment(target))];
         let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("post"),
@@ -2396,8 +2659,11 @@ impl Renderer {
             let post = cfg.post;
             return PostParams {
                 flags: [
-                    (if post.map(|p| p.bloom).unwrap_or(false) { 2 } else { 0 })
-                        | (if post.is_some() { 4 } else { 0 }),
+                    (if post.map(|p| p.bloom).unwrap_or(false) {
+                        2
+                    } else {
+                        0
+                    }) | (if post.is_some() { 4 } else { 0 }),
                     0,
                     0,
                     0,
@@ -2509,10 +2775,24 @@ impl Renderer {
         }
         // Flush art that arrived before overlay init.
         if let Some((w, h, rgba)) = self.pending_logo.take() {
-            Self::upload_logo(self.overlay.as_mut().unwrap(), &self.device, &self.queue, w, h, rgba);
+            Self::upload_logo(
+                self.overlay.as_mut().unwrap(),
+                &self.device,
+                &self.queue,
+                w,
+                h,
+                rgba,
+            );
         }
         if let Some((w, h, rgba)) = self.pending_bg.take() {
-            Self::upload_bg(self.overlay.as_mut().unwrap(), &self.device, &self.queue, w, h, rgba);
+            Self::upload_bg(
+                self.overlay.as_mut().unwrap(),
+                &self.device,
+                &self.queue,
+                w,
+                h,
+                rgba,
+            );
         }
         self.pending_overlay = Some(draw);
     }
@@ -2541,7 +2821,11 @@ impl Renderer {
             queue,
             &wgpu::TextureDescriptor {
                 label: Some("overlay-logo"),
-                size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
@@ -2557,10 +2841,22 @@ impl Renderer {
             label: Some("overlay-tex-bg"),
             layout: &ov.tex_bgl,
             entries: &[
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&view) },
-                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&ov.logo_sampler) },
-                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&ov.bg_view) },
-                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::Sampler(&ov.bg_sampler) },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&ov.logo_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(&ov.bg_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::Sampler(&ov.bg_sampler),
+                },
             ],
         });
         ov.logo_view = view;
@@ -2589,7 +2885,11 @@ impl Renderer {
             queue,
             &wgpu::TextureDescriptor {
                 label: Some("overlay-menu-bg"),
-                size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
@@ -2649,10 +2949,18 @@ impl Renderer {
             }
         }
         let device = &self.device;
-        let shadow_res = config.shadows.as_ref().map(|s| s.resolution).unwrap_or(1024);
+        let shadow_res = config
+            .shadows
+            .as_ref()
+            .map(|s| s.resolution)
+            .unwrap_or(1024);
         let shadow_tex = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("shadow-map"),
-            size: wgpu::Extent3d { width: shadow_res, height: shadow_res, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width: shadow_res,
+                height: shadow_res,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -2691,84 +2999,85 @@ impl Renderer {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        let lighting_bind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("lighting-bgl"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+        let lighting_bind_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("lighting-bgl"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    // Scene depth is loaded (not compared): float texture.
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        // Scene depth is loaded (not compared): float texture.
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 4,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                        count: None,
                     },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 5,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 4,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 6,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Depth,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 5,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 7,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
-                    count: None,
-                },
-            ],
-        });
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 6,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Depth,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 7,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
+                        count: None,
+                    },
+                ],
+            });
 
         // --- Pipelines -----------------------------------------------------
         let terrain = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -2823,11 +3132,31 @@ impl Renderer {
             array_stride: std::mem::size_of::<Vertex>() as u64,
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &[
-                wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 0, shader_location: 0 },
-                wgpu::VertexAttribute { format: wgpu::VertexFormat::Unorm16x2, offset: 12, shader_location: 1 },
-                wgpu::VertexAttribute { format: wgpu::VertexFormat::Unorm8x4, offset: 16, shader_location: 2 },
-                wgpu::VertexAttribute { format: wgpu::VertexFormat::Uint8x2, offset: 20, shader_location: 3 },
-                wgpu::VertexAttribute { format: wgpu::VertexFormat::Unorm8x2, offset: 22, shader_location: 4 },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x3,
+                    offset: 0,
+                    shader_location: 0,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Unorm16x2,
+                    offset: 12,
+                    shader_location: 1,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Unorm8x4,
+                    offset: 16,
+                    shader_location: 2,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Uint8x2,
+                    offset: 20,
+                    shader_location: 3,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Unorm8x2,
+                    offset: 22,
+                    shader_location: 4,
+                },
             ],
         })];
 
@@ -2916,7 +3245,11 @@ impl Renderer {
                 depth_write_enabled: Some(true),
                 depth_compare: Some(wgpu::CompareFunction::Less),
                 stencil: Default::default(),
-                bias: wgpu::DepthBiasState { constant: 2, slope_scale: 2.0, clamp: 0.0 },
+                bias: wgpu::DepthBiasState {
+                    constant: 2,
+                    slope_scale: 2.0,
+                    clamp: 0.0,
+                },
             }),
             multisample: Default::default(),
             multiview_mask: None,
@@ -2993,8 +3326,6 @@ impl Renderer {
     }
 }
 
-
-
 /// Normalized world-space direction of the view ray through the frustum
 /// corner at NDC (x, y). Built from the camera basis (no matrix inverse:
 /// the far-plane unprojection degenerates at w→0 and float precision on
@@ -3047,9 +3378,24 @@ fn inverse_view_proj(camera: &Camera) -> [[f32; 4]; 4] {
     let d_u = dot3(up, eye);
     let d_f = dot3(forward, eye);
     let inv_view = [
-        [right[0], up[0], -forward[0], right[0] * d_r + up[0] * d_u + forward[0] * d_f],
-        [right[1], up[1], -forward[1], right[1] * d_r + up[1] * d_u + forward[1] * d_f],
-        [right[2], up[2], -forward[2], right[2] * d_r + up[2] * d_u + forward[2] * d_f],
+        [
+            right[0],
+            up[0],
+            -forward[0],
+            right[0] * d_r + up[0] * d_u + forward[0] * d_f,
+        ],
+        [
+            right[1],
+            up[1],
+            -forward[1],
+            right[1] * d_r + up[1] * d_u + forward[1] * d_f,
+        ],
+        [
+            right[2],
+            up[2],
+            -forward[2],
+            right[2] * d_r + up[2] * d_u + forward[2] * d_f,
+        ],
         [0.0, 0.0, 0.0, 1.0],
     ];
 
@@ -3077,7 +3423,12 @@ fn sun_view_proj(cam_pos: [f32; 3], sun: &[f32; 3], distance: f32) -> ([[f32; 4]
     let proj = [
         [1.0 / extent, 0.0, 0.0, 0.0],
         [0.0, 1.0 / extent, 0.0, 0.0],
-        [0.0, 0.0, -1.0 / (z_far - z_near), -z_near / (z_far - z_near)],
+        [
+            0.0,
+            0.0,
+            -1.0 / (z_far - z_near),
+            -z_near / (z_far - z_near),
+        ],
         [0.0, 0.0, 0.0, 1.0],
     ];
     (compose(proj, view), extent)
@@ -3129,7 +3480,15 @@ pub fn sprite_uv_table(
         .zip(opaque)
         .map(|(name, opaque)| {
             atlas.get(&name.0, &name.1).map(|e| {
-                (e.x, e.y, e.frame_w, e.frame_h, e.frames, e.frame_stride, opaque)
+                (
+                    e.x,
+                    e.y,
+                    e.frame_w,
+                    e.frame_h,
+                    e.frames,
+                    e.frame_stride,
+                    opaque,
+                )
             })
         })
         .collect();
@@ -3148,9 +3507,23 @@ pub fn build_meshes(world: &World, registry: &Registry, atlas: &Atlas) -> Meshed
         // Layer classification: a sprite is "opaque" only if every texel is
         // fully opaque (blocks glass/leaves/plants from the opaque layer).
         let opaque = atlas_opaque(atlas, e);
-        Some((e.x, e.y, e.frame_w, e.frame_h, e.frames, e.frame_stride, opaque))
+        Some((
+            e.x,
+            e.y,
+            e.frame_w,
+            e.frame_h,
+            e.frames,
+            e.frame_stride,
+            opaque,
+        ))
     };
-    mesh_world(world, registry, &name_lookup, (atlas.width, atlas.height), &tint)
+    mesh_world(
+        world,
+        registry,
+        &name_lookup,
+        (atlas.width, atlas.height),
+        &tint,
+    )
 }
 
 /// Build a second mesh where the per-vertex `light` attribute carries

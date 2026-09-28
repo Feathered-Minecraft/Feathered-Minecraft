@@ -137,7 +137,10 @@ mod tests {
         let m = input.move_intent();
         assert_eq!(m.forward, 1.0, "rebound key drives forward");
         assert!(m.jump);
-        assert!(!input.action_down(Action::Sprint), "unrelated keys untouched");
+        assert!(
+            !input.action_down(Action::Sprint),
+            "unrelated keys untouched"
+        );
     }
 
     #[test]

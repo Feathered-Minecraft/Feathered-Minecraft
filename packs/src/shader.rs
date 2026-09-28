@@ -65,10 +65,16 @@ impl ShaderPack {
     /// Path of the pack's own license file, if it shipped one. Feathered
     /// preserves it verbatim and never edits or relicenses it.
     pub fn license_file(&self) -> Option<PathBuf> {
-        ["LICENSE", "LICENSE.md", "LICENSE.txt", "COPYING", "license.txt"]
-            .iter()
-            .map(|n| self.dir.join(n))
-            .find(|p| p.is_file())
+        [
+            "LICENSE",
+            "LICENSE.md",
+            "LICENSE.txt",
+            "COPYING",
+            "license.txt",
+        ]
+        .iter()
+        .map(|n| self.dir.join(n))
+        .find(|p| p.is_file())
     }
 
     /// Human-readable license note. Deliberately vague unless the pack
@@ -78,7 +84,9 @@ impl ShaderPack {
             (Some(note), _) => note.clone(),
             (None, Some(file)) => format!(
                 "Third-party shader pack — its own license applies (see {})",
-                file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+                file.file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default()
             ),
             (None, None) => "Third-party shader pack — its own license applies \
                 (no license file found; check the pack's distribution page)"
@@ -131,7 +139,10 @@ impl ShaderPackManager {
     }
 
     fn settings_path(&self) -> PathBuf {
-        self.base.parent().unwrap_or(&self.base).join("settings.json")
+        self.base
+            .parent()
+            .unwrap_or(&self.base)
+            .join("settings.json")
     }
 
     pub fn settings(&self) -> PackSettings {
@@ -246,7 +257,9 @@ impl ShaderPackManager {
     }
 
     /// Structural validation over archive entries before extracting.
-    fn validate_entries(archive: &mut zip::ZipArchive<std::fs::File>) -> Result<ShaderValidation, String> {
+    fn validate_entries(
+        archive: &mut zip::ZipArchive<std::fs::File>,
+    ) -> Result<ShaderValidation, String> {
         let mut validation = ShaderValidation::default();
         let mut has_shaders_dir = false;
         let mut shader_files = 0usize;
@@ -267,16 +280,16 @@ impl ShaderPackManager {
                 } else if lower.ends_with(".glsl") || lower.ends_with(".gsh") {
                     shader_files += 1;
                 } else if lower.ends_with("shaders.properties") {
-                    validation.engines = parse_properties_text(
-                        &std::io::read_to_string(entry).unwrap_or_default(),
-                    );
+                    validation.engines =
+                        parse_properties_text(&std::io::read_to_string(entry).unwrap_or_default());
                 }
             }
         }
         if !has_shaders_dir {
             validation.fatal = Some("no shaders/ directory in archive".into());
         } else if shader_files == 0 {
-            validation.warnings
+            validation
+                .warnings
                 .push("shaders/ exists but contains no recognizable shader files".into());
         }
         Ok(validation)
@@ -397,7 +410,8 @@ impl ShaderPackManager {
                 .unwrap_or([0; 16]),
         );
         let hash = format!("{:x}", hasher.finalize());
-        self.base.join(format!("{}-{}", crate::resource::slug_of(name), &hash[..8]))
+        self.base
+            .join(format!("{}-{}", crate::resource::slug_of(name), &hash[..8]))
     }
 }
 
@@ -503,7 +517,9 @@ fn stem(p: &Path) -> String {
 fn top_level_dir(archive: &mut zip::ZipArchive<std::fs::File>) -> Option<PathBuf> {
     let mut first: Option<String> = None;
     for i in 0..archive.len() {
-        let Ok(entry) = archive.by_index(i) else { continue };
+        let Ok(entry) = archive.by_index(i) else {
+            continue;
+        };
         let name = entry.name();
         if entry.is_dir() || name.starts_with('.') {
             continue;
@@ -527,7 +543,11 @@ fn top_level_dir(archive: &mut zip::ZipArchive<std::fs::File>) -> Option<PathBuf
 fn shader_id(dir: &Path) -> String {
     format!(
         "{}-{}",
-        crate::resource::slug_of(&dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()),
+        crate::resource::slug_of(
+            &dir.file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        ),
         {
             let mut hasher = Sha256::new();
             if let Ok(bytes) = std::fs::read(dir.join("shaders").join("shaders.properties")) {

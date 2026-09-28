@@ -10,7 +10,8 @@ use std::io::Write;
 // ---------------------------------------------------------------------------
 
 const MCMETA_26_3: &str = r#"{"pack":{"pack_format":97,"description":"Feathered test pack"}}"#;
-const MCMETA_1_21: &str = r#"{"pack":{"pack_format":61,"description":["Chapter ",{"text":"one","color":"red"}]}}"#;
+const MCMETA_1_21: &str =
+    r#"{"pack":{"pack_format":61,"description":["Chapter ",{"text":"one","color":"red"}]}}"#;
 
 fn write_pack_dir(root: &Path, name: &str, mcmeta: &str) -> PathBuf {
     let dir = root.join(name);
@@ -22,7 +23,11 @@ fn write_pack_dir(root: &Path, name: &str, mcmeta: &str) -> PathBuf {
         r#"{"variants":{"":{"model":"minecraft:block/stone"}}}"#,
     )
     .unwrap();
-    std::fs::write(dir.join("assets/minecraft/textures/block/stone.png"), b"\x89PNG fake").unwrap();
+    std::fs::write(
+        dir.join("assets/minecraft/textures/block/stone.png"),
+        b"\x89PNG fake",
+    )
+    .unwrap();
     dir
 }
 
@@ -44,7 +49,10 @@ fn zip_entries(name: &str, mcmeta: &str) -> Vec<(String, Vec<u8>)> {
             format!("{name}/assets/minecraft/blockstates/stone.json"),
             br#"{"variants":{"":{"model":"minecraft:block/stone"}}}"#.to_vec(),
         ),
-        (format!("{name}/assets/minecraft/textures/block/stone.png"), b"\x89PNG fake".to_vec()),
+        (
+            format!("{name}/assets/minecraft/textures/block/stone.png"),
+            b"\x89PNG fake".to_vec(),
+        ),
     ]
 }
 
@@ -145,7 +153,10 @@ fn import_zip_extracts_and_validates() {
 
     let zip_path = tmp.path().join("MyPack.zip");
     let entries = zip_entries("MyPack", MCMETA_26_3);
-    let refs: Vec<(&str, &[u8])> = entries.iter().map(|(n, b)| (n.as_str(), b.as_slice())).collect();
+    let refs: Vec<(&str, &[u8])> = entries
+        .iter()
+        .map(|(n, b)| (n.as_str(), b.as_slice()))
+        .collect();
     write_zip(&zip_path, &refs);
 
     let report = mgr.import_zip(&zip_path).unwrap();
@@ -155,7 +166,11 @@ fn import_zip_extracts_and_validates() {
     assert!(report.files_copied >= 3);
     // The wrapper folder was stripped: pack.mcmeta is directly in pack.dir.
     assert!(report.pack.dir.join("pack.mcmeta").is_file());
-    assert!(report.pack.dir.join("assets/minecraft/blockstates/stone.json").is_file());
+    assert!(report
+        .pack
+        .dir
+        .join("assets/minecraft/blockstates/stone.json")
+        .is_file());
     // Original ZIP untouched.
     assert!(zip_path.is_file());
 
@@ -241,7 +256,10 @@ fn uninstall_zip_removes_extracted_copy_but_never_original() {
     let mgr = ResourcePackManager::open_at(tmp.path().join("data"));
     let zip_path = tmp.path().join("Del.zip");
     let entries = zip_entries("Del", MCMETA_26_3);
-    let refs: Vec<(&str, &[u8])> = entries.iter().map(|(n, b)| (n.as_str(), b.as_slice())).collect();
+    let refs: Vec<(&str, &[u8])> = entries
+        .iter()
+        .map(|(n, b)| (n.as_str(), b.as_slice()))
+        .collect();
     write_zip(&zip_path, &refs);
 
     let report = mgr.import_zip(&zip_path).unwrap();
@@ -329,7 +347,10 @@ fn scan_imports_packs_from_a_resourcepacks_folder() {
     std::fs::create_dir_all(&rp).unwrap();
     write_pack_dir(&rp, "FolderPack", MCMETA_26_3);
     let entries = zip_entries("ZippedPack", MCMETA_26_3);
-    let refs: Vec<(&str, &[u8])> = entries.iter().map(|(n, b)| (n.as_str(), b.as_slice())).collect();
+    let refs: Vec<(&str, &[u8])> = entries
+        .iter()
+        .map(|(n, b)| (n.as_str(), b.as_slice()))
+        .collect();
     write_zip(&rp.join("ZippedPack.zip"), &refs);
 
     let reports = mgr.import_all_folders_under(&rp).unwrap();

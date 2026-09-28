@@ -7,7 +7,11 @@ use feathered_assets::compiler::{compile_pack, REQUIRED_BLOCKS};
 use feathered_assets::pack::discover;
 
 fn test_pack_root() -> &'static str {
-    for p in ["texture/assets", "../texture/assets", "../../texture/assets"] {
+    for p in [
+        "texture/assets",
+        "../texture/assets",
+        "../../texture/assets",
+    ] {
         if std::path::Path::new(p).join("pack.mcmeta").exists() {
             return p;
         }
@@ -60,7 +64,11 @@ fn oak_log_compiles_to_six_quads_with_two_sprites() {
 fn grass_block_has_tinted_faces() {
     let index = discover(std::path::Path::new(test_pack_root())).unwrap();
     let (pack, _atlas, _stats) = compile_pack(&index, true).unwrap();
-    let grass = pack.blocks.iter().find(|b| b.name == "grass_block").unwrap();
+    let grass = pack
+        .blocks
+        .iter()
+        .find(|b| b.name == "grass_block")
+        .unwrap();
     let snow_states: Vec<bool> = grass
         .states
         .iter()
@@ -115,7 +123,11 @@ fn rail_is_flat_geometry() {
 fn redstone_wire_multipart_states() {
     let index = discover(std::path::Path::new(test_pack_root())).unwrap();
     let (pack, _atlas, _stats) = compile_pack(&index, true).unwrap();
-    let wire = pack.blocks.iter().find(|b| b.name == "redstone_wire").unwrap();
+    let wire = pack
+        .blocks
+        .iter()
+        .find(|b| b.name == "redstone_wire")
+        .unwrap();
     assert_eq!(wire.states.len(), 81); // north/east/south/west × side|up|none-ish combos
     assert!(wire.states.iter().any(|s| matches!(
         s.appearance,

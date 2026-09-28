@@ -109,9 +109,17 @@ impl Perlin {
         let bb2 = h(xi + 1, yi + 1, zi + 1);
         let lerp = |a: f32, b: f32, t: f32| a + (b - a) * t;
         let x1 = lerp(grad(aa, tx, ty, tz), grad(ba, tx - 1.0, ty, tz), u);
-        let x2 = lerp(grad(ab, tx, ty - 1.0, tz), grad(bb, tx - 1.0, ty - 1.0, tz), u);
+        let x2 = lerp(
+            grad(ab, tx, ty - 1.0, tz),
+            grad(bb, tx - 1.0, ty - 1.0, tz),
+            u,
+        );
         let y1 = lerp(x1, x2, v);
-        let x3 = lerp(grad(ac, tx, ty, tz - 1.0), grad(bc, tx - 1.0, ty, tz - 1.0), u);
+        let x3 = lerp(
+            grad(ac, tx, ty, tz - 1.0),
+            grad(bc, tx - 1.0, ty, tz - 1.0),
+            u,
+        );
         let x4 = lerp(
             grad(ab2, tx, ty - 1.0, tz - 1.0),
             grad(bb2, tx - 1.0, ty - 1.0, tz - 1.0),
@@ -201,7 +209,10 @@ mod tests {
         let n = Perlin::new(99);
         let a = n.sample(10.0, 0.0, 10.0);
         let b = n.sample(10.01, 0.0, 10.0);
-        assert!((a - b).abs() < 0.1, "nearby samples must be close: {a} vs {b}");
+        assert!(
+            (a - b).abs() < 0.1,
+            "nearby samples must be close: {a} vs {b}"
+        );
     }
 
     #[test]

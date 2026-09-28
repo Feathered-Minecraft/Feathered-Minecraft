@@ -82,7 +82,10 @@ mod tests {
     fn noon_has_the_sun_at_the_zenith() {
         let mut day = DayCycle::default();
         day.fraction = 0.25;
-        assert!((day.elevation_sin() - 1.0).abs() < 1e-5, "noon elevation = 1");
+        assert!(
+            (day.elevation_sin() - 1.0).abs() < 1e-5,
+            "noon elevation = 1"
+        );
         assert!(!day.is_night());
         day.fraction = 0.0;
         assert!(day.elevation_sin().abs() < 1e-5, "sunrise elevation = 0");
@@ -90,7 +93,10 @@ mod tests {
         assert!(day.elevation_sin().abs() < 1e-5, "sunset elevation = 0");
         assert!(!day.is_night(), "sunset edge still counts as day");
         day.fraction = 0.75;
-        assert!((day.elevation_sin() + 1.0).abs() < 1e-5, "midnight elevation = -1");
+        assert!(
+            (day.elevation_sin() + 1.0).abs() < 1e-5,
+            "midnight elevation = -1"
+        );
         assert!(day.is_night());
     }
 

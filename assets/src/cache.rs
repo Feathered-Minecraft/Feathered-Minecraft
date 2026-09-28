@@ -96,7 +96,10 @@ pub fn decode(bytes: &[u8]) -> AssetResult<([u8; 32], CachePayload)> {
     if bytes.len() != 52 + payload_len {
         return crate::error::err(
             "<cache>",
-            format!("payload length {payload_len} != file remainder {}", bytes.len() - 52),
+            format!(
+                "payload length {payload_len} != file remainder {}",
+                bytes.len() - 52
+            ),
         );
     }
     let payload: CachePayload = bincode::deserialize(&bytes[52..]).map_err(|e| AssetError {
@@ -107,7 +110,10 @@ pub fn decode(bytes: &[u8]) -> AssetResult<([u8; 32], CachePayload)> {
 }
 
 /// Round-trip helpers used by the pack compiler.
-pub fn atlas_to_cached(atlas: &crate::atlas::Atlas, sprite_names: &[(String, String)]) -> CachedAtlas {
+pub fn atlas_to_cached(
+    atlas: &crate::atlas::Atlas,
+    sprite_names: &[(String, String)],
+) -> CachedAtlas {
     let mut index_of = std::collections::HashMap::new();
     for (i, n) in sprite_names.iter().enumerate() {
         index_of.insert(n, i as u32);
@@ -117,7 +123,16 @@ pub fn atlas_to_cached(atlas: &crate::atlas::Atlas, sprite_names: &[(String, Str
     sorted.sort_by_key(|(k, _)| index_of.get(k).copied().unwrap_or(u32::MAX));
     for (name, e) in sorted {
         let key = index_of.get(name).copied().unwrap_or(u32::MAX);
-        entries.push((key, e.x, e.y, e.frame_w, e.frame_h, e.frames, e.frame_stride, e.slot_stride));
+        entries.push((
+            key,
+            e.x,
+            e.y,
+            e.frame_w,
+            e.frame_h,
+            e.frames,
+            e.frame_stride,
+            e.slot_stride,
+        ));
     }
     CachedAtlas {
         width: atlas.width,
@@ -128,7 +143,10 @@ pub fn atlas_to_cached(atlas: &crate::atlas::Atlas, sprite_names: &[(String, Str
     }
 }
 
-pub fn cached_to_atlas(cached: &CachedAtlas, sprite_names: &[(String, String)]) -> crate::atlas::Atlas {
+pub fn cached_to_atlas(
+    cached: &CachedAtlas,
+    sprite_names: &[(String, String)],
+) -> crate::atlas::Atlas {
     let mut entries = std::collections::HashMap::new();
     for (key, x, y, fw, fh, frames, fstride, sstride) in &cached.entries {
         if let Some(name) = sprite_names.get(*key as usize) {

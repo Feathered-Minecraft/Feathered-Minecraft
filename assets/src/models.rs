@@ -189,7 +189,10 @@ pub fn compile(
     while let Some(n) = cur {
         depth += 1;
         if depth > 32 {
-            return crate::error::err(&format!("{}:{}", name.0, name.1), "parent chain too deep (cycle?)");
+            return crate::error::err(
+                &format!("{}:{}", name.0, name.1),
+                "parent chain too deep (cycle?)",
+            );
         }
         let model = raws.get(&n).ok_or_else(|| AssetError {
             path: format!("{}:{}", n.0, n.1),
@@ -214,7 +217,10 @@ pub fn compile(
         for (k, v) in &model.textures {
             let val = match v {
                 RawTextureValue::Str(s) => RawTextureValue::Str(s.clone()),
-                RawTextureValue::Sprite { sprite, force_translucent } => RawTextureValue::Sprite {
+                RawTextureValue::Sprite {
+                    sprite,
+                    force_translucent,
+                } => RawTextureValue::Sprite {
                     sprite: sprite.clone(),
                     force_translucent: *force_translucent,
                 },
@@ -231,11 +237,20 @@ pub fn compile(
     }
 
     // Nearest-wins scalar fields.
-    let ambient_occlusion = chain.iter().find_map(|m| m.ambientocclusion).unwrap_or(true);
+    let ambient_occlusion = chain
+        .iter()
+        .find_map(|m| m.ambientocclusion)
+        .unwrap_or(true);
     let gui_light = chain
         .iter()
         .find_map(|m| m.gui_light.clone())
-        .map(|g| if g == "front" { GuiLight::Front } else { GuiLight::Side })
+        .map(|g| {
+            if g == "front" {
+                GuiLight::Front
+            } else {
+                GuiLight::Side
+            }
+        })
         .unwrap_or(GuiLight::Side);
     let mut display = HashMap::new();
     for model in &chain {
@@ -254,7 +269,13 @@ pub fn compile(
         }
     }
 
-    Ok(CompiledModel { quads, particle, ambient_occlusion, gui_light, display })
+    Ok(CompiledModel {
+        quads,
+        particle,
+        ambient_occlusion,
+        gui_light,
+        display,
+    })
 }
 
 /// Resolve a `#var` chain against the merged texture map.
@@ -265,7 +286,10 @@ fn resolve_var(var: &str, textures: &HashMap<String, ResolvedSprite>) -> Option<
     for _ in 0..12 {
         let Some(rest) = cur.strip_prefix('#') else {
             let r = normalize_ref(&cur);
-            return Some(ResolvedSprite { name: r, force_translucent: false });
+            return Some(ResolvedSprite {
+                name: r,
+                force_translucent: false,
+            });
         };
         let resolved = textures.get(rest)?;
         if resolved.name.1.starts_with('#') {
@@ -279,9 +303,7 @@ fn resolve_var(var: &str, textures: &HashMap<String, ResolvedSprite>) -> Option<
 
 /// Same as `resolve_var` but for particle sprites: falls back to the first
 /// face sprite when the particle var never resolves to a concrete name.
-fn resolve_particle(
-    textures: &HashMap<String, ResolvedSprite>,
-) -> SpriteRef {
+fn resolve_particle(textures: &HashMap<String, ResolvedSprite>) -> SpriteRef {
     if let Some(p) = textures.get("particle") {
         if !p.name.1.starts_with('#') {
             return p.name.clone();
@@ -306,8 +328,12 @@ fn bake_element(
     let rot = el.rotation.clone();
 
     for (face_name, face) in &el.faces {
-        let Some(dir0) = Direction::from_name(face_name) else { continue };
-        let Some(sprite) = resolve_var(&face.texture, textures) else { continue };
+        let Some(dir0) = Direction::from_name(face_name) else {
+            continue;
+        };
+        let Some(sprite) = resolve_var(&face.texture, textures) else {
+            continue;
+        };
         let sprite_id = interner.intern(sprite.name);
 
         // Default UVs: full sprite, oriented per face.

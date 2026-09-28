@@ -160,14 +160,18 @@ impl EntityWorld {
     /// Read access (None when stale).
     pub fn get(&self, id: EntityId) -> Option<&MobState> {
         self.slots.get(id.index as usize).and_then(|s| {
-            (s.generation == id.generation).then_some(()).and(s.state.as_ref())
+            (s.generation == id.generation)
+                .then_some(())
+                .and(s.state.as_ref())
         })
     }
 
     /// Write access (None when stale).
     pub fn get_mut(&mut self, id: EntityId) -> Option<&mut MobState> {
         self.slots.get_mut(id.index as usize).and_then(|s| {
-            (s.generation == id.generation).then_some(()).and(s.state.as_mut())
+            (s.generation == id.generation)
+                .then_some(())
+                .and(s.state.as_mut())
         })
     }
 
@@ -183,18 +187,30 @@ impl EntityWorld {
     /// Iterate (id, state) pairs in deterministic id order.
     pub fn iter(&self) -> impl Iterator<Item = (EntityId, &MobState)> {
         self.slots.iter().enumerate().filter_map(|(i, s)| {
-            s.state
-                .as_ref()
-                .map(|st| (EntityId { index: i as u32, generation: s.generation }, st))
+            s.state.as_ref().map(|st| {
+                (
+                    EntityId {
+                        index: i as u32,
+                        generation: s.generation,
+                    },
+                    st,
+                )
+            })
         })
     }
 
     /// Mutable iterate in id order.
     pub fn iter_mut(&mut self) -> impl Iterator<Item = (EntityId, &mut MobState)> {
         self.slots.iter_mut().enumerate().filter_map(|(i, s)| {
-            s.state
-                .as_mut()
-                .map(|st| (EntityId { index: i as u32, generation: s.generation }, st))
+            s.state.as_mut().map(|st| {
+                (
+                    EntityId {
+                        index: i as u32,
+                        generation: s.generation,
+                    },
+                    st,
+                )
+            })
         })
     }
 
@@ -304,10 +320,14 @@ mod tests {
         let _ = w.spawn(mob(0.0, MobKind::Lurker));
         let _ = w.spawn(mob(50.0, MobKind::Lurker));
         let _ = w.spawn(mob(2.0, MobKind::Muncher));
-        let (id, p) = w.nearest_of_kind([0.0, 20.0, 0.0], MobKind::Lurker, 10.0).unwrap();
+        let (id, p) = w
+            .nearest_of_kind([0.0, 20.0, 0.0], MobKind::Lurker, 10.0)
+            .unwrap();
         assert_eq!(p[0], 0.0);
         assert!(w.get(id).is_some());
-        assert!(w.nearest_of_kind([0.0, 20.0, 0.0], MobKind::Muncher, 1.0).is_none());
+        assert!(w
+            .nearest_of_kind([0.0, 20.0, 0.0], MobKind::Muncher, 1.0)
+            .is_none());
     }
 
     #[test]
@@ -333,7 +353,9 @@ mod tests {
         let mut w2 = EntityWorld::new();
         w2.restore(serde_json::from_str(&snap).unwrap());
         assert_eq!(w2.len(), 2);
-        assert_eq!(w.iter().map(|(_, s)| s.pos).collect::<Vec<_>>(),
-                   w2.iter().map(|(_, s)| s.pos).collect::<Vec<_>>());
+        assert_eq!(
+            w.iter().map(|(_, s)| s.pos).collect::<Vec<_>>(),
+            w2.iter().map(|(_, s)| s.pos).collect::<Vec<_>>()
+        );
     }
 }

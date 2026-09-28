@@ -125,7 +125,10 @@ pub struct GenStats {
 impl GenStats {
     /// Average + max generation time in microseconds.
     pub fn summary(&self) -> (u64, u64) {
-        let n = self.chunks_generated.load(std::sync::atomic::Ordering::Relaxed).max(1);
+        let n = self
+            .chunks_generated
+            .load(std::sync::atomic::Ordering::Relaxed)
+            .max(1);
         let total = self.total_gen_us.load(std::sync::atomic::Ordering::Relaxed);
         let max = self.max_gen_us.load(std::sync::atomic::Ordering::Relaxed);
         (total / n, max)
@@ -170,11 +173,8 @@ impl WorldGenerator {
 
         let bias = biome.height_bias();
         let scale = biome.height_scale();
-        let mut h = BASE_HEIGHT as f32
-            + base_n * 8.0
-            + bias
-            + hills_n * 6.0 * scale
-            + rough_n * 1.5;
+        let mut h =
+            BASE_HEIGHT as f32 + base_n * 8.0 + bias + hills_n * 6.0 * scale + rough_n * 1.5;
 
         // Ocean confirmation: pull low-continentalness columns down.
         if biome == Biome::Ocean {
@@ -217,7 +217,10 @@ impl WorldGenerator {
         // Cheese pockets: big caverns deep down only.
         let deep = y < surface - 12;
         let cheese = deep
-            && self.cave_cheese.sample(x as f32 * 0.9, y as f32 * 1.4, z as f32 * 0.9) > 0.58;
+            && self
+                .cave_cheese
+                .sample(x as f32 * 0.9, y as f32 * 1.4, z as f32 * 0.9)
+                > 0.58;
         // Surface skin: solid crust of 3 blocks under grass stays intact
         // (handled by the y > surface - 3 guard above).
         tube || cheese
@@ -245,13 +248,7 @@ impl WorldGenerator {
     }
 
     /// The surface block + subsurface for one column (surface rules).
-    pub(crate) fn surface_pair(
-        &self,
-        _x: i64,
-        _z: i64,
-        col: &Column,
-        b: &Blocks,
-    ) -> (u32, u32) {
+    pub(crate) fn surface_pair(&self, _x: i64, _z: i64, col: &Column, b: &Blocks) -> (u32, u32) {
         match col.biome {
             Biome::Desert => {
                 if b.sand != 0 {
@@ -390,7 +387,11 @@ impl WorldGenerator {
                     Biome::Forest => 0.55,
                     Biome::Plains => 0.06,
                     Biome::Snowfield => 0.12,
-                    Biome::Desert | Biome::Ocean | Biome::Mountains if col.height > BASE_HEIGHT + 14 => 0.0,
+                    Biome::Desert | Biome::Ocean | Biome::Mountains
+                        if col.height > BASE_HEIGHT + 14 =>
+                    {
+                        0.0
+                    }
                     _ => 0.0,
                 };
                 if roll >= density || col.height <= SEA_LEVEL {
@@ -438,5 +439,3 @@ impl WorldGenerator {
         }
     }
 }
-
-

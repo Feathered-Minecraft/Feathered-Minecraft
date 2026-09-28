@@ -20,33 +20,46 @@ impl ValidationReport {
 
     pub fn print(&self) {
         for (name, ok, detail) in &self.lines {
-            println!("  [{}] {:<14} {}", if *ok { "x" } else { " " }, name, detail);
+            println!(
+                "  [{}] {:<14} {}",
+                if *ok { "x" } else { " " },
+                name,
+                detail
+            );
         }
     }
 }
 
-pub fn validate(runtime: &Registry, atlas: &Atlas, store: &SpriteStore) -> AssetResult<ValidationReport> {
+pub fn validate(
+    runtime: &Registry,
+    atlas: &Atlas,
+    store: &SpriteStore,
+) -> AssetResult<ValidationReport> {
     let mut lines = Vec::new();
 
     // --- oak_log: 3 axis variants, cube of 6 quads, distinct end/side -----
     {
-        let three_axis = runtime.block("oak_log").map(|b| {
-            b.states.len() == 3
-                && b.states.iter().all(|s| match &s.appearance {
-                    CompiledAppearance::Static(m) => {
-                        m.len() == 1
-                            && runtime
-                                .model(m[0].model)
-                                .map(|m| m.quads.len() == 6)
-                                .unwrap_or(false)
-                    }
-                    _ => false,
-                })
-        }).unwrap_or(false);
+        let three_axis = runtime
+            .block("oak_log")
+            .map(|b| {
+                b.states.len() == 3
+                    && b.states.iter().all(|s| match &s.appearance {
+                        CompiledAppearance::Static(m) => {
+                            m.len() == 1
+                                && runtime
+                                    .model(m[0].model)
+                                    .map(|m| m.quads.len() == 6)
+                                    .unwrap_or(false)
+                        }
+                        _ => false,
+                    })
+            })
+            .unwrap_or(false);
         let end_side = runtime
             .model_of("oak_log", 0)
             .map(|m| {
-                let sprites: std::collections::HashSet<_> = m.quads.iter().map(|q| q.sprite).collect();
+                let sprites: std::collections::HashSet<_> =
+                    m.quads.iter().map(|q| q.sprite).collect();
                 sprites.len() == 2
             })
             .unwrap_or(false);
@@ -70,9 +83,10 @@ pub fn validate(runtime: &Registry, atlas: &Atlas, store: &SpriteStore) -> Asset
                 b.states.iter().any(|s| {
                     let models: Vec<_> = match &s.appearance {
                         CompiledAppearance::Static(m) => m.iter().map(|mi| mi.model).collect(),
-                        CompiledAppearance::Variants(v) | CompiledAppearance::Multipart(v) => {
-                            v.iter().flat_map(|(_, ms)| ms.iter().map(|mi| mi.model)).collect()
-                        }
+                        CompiledAppearance::Variants(v) | CompiledAppearance::Multipart(v) => v
+                            .iter()
+                            .flat_map(|(_, ms)| ms.iter().map(|mi| mi.model))
+                            .collect(),
                     };
                     models.iter().any(|m| {
                         runtime
@@ -86,7 +100,11 @@ pub fn validate(runtime: &Registry, atlas: &Atlas, store: &SpriteStore) -> Asset
         lines.push((
             "grass_block".into(),
             has_tint,
-            if has_tint { "tinted faces present (top + side overlay)".into() } else { "no tinted faces".into() },
+            if has_tint {
+                "tinted faces present (top + side overlay)".into()
+            } else {
+                "no tinted faces".into()
+            },
         ));
     }
 
@@ -99,7 +117,11 @@ pub fn validate(runtime: &Registry, atlas: &Atlas, store: &SpriteStore) -> Asset
         lines.push((
             "stone".into(),
             occ,
-            if occ { "classified full opaque occluder".into() } else { "not classified as occluder".into() },
+            if occ {
+                "classified full opaque occluder".into()
+            } else {
+                "not classified as occluder".into()
+            },
         ));
     }
 
@@ -112,7 +134,11 @@ pub fn validate(runtime: &Registry, atlas: &Atlas, store: &SpriteStore) -> Asset
         lines.push((
             "glass".into(),
             no_occ,
-            if no_occ { "non-occluding (neighbor faces preserved)".into() } else { "wrongly occluding".into() },
+            if no_occ {
+                "non-occluding (neighbor faces preserved)".into()
+            } else {
+                "wrongly occluding".into()
+            },
         ));
     }
 
@@ -125,7 +151,11 @@ pub fn validate(runtime: &Registry, atlas: &Atlas, store: &SpriteStore) -> Asset
         lines.push((
             "torch".into(),
             torch_ok,
-            if torch_ok { "non-cube geometry with side faces".into() } else { "geometry missing".into() },
+            if torch_ok {
+                "non-cube geometry with side faces".into()
+            } else {
+                "geometry missing".into()
+            },
         ));
     }
 
@@ -143,7 +173,11 @@ pub fn validate(runtime: &Registry, atlas: &Atlas, store: &SpriteStore) -> Asset
         lines.push((
             "rail".into(),
             rail_ok,
-            if rail_ok { "flat quad present".into() } else { "no flat quad".into() },
+            if rail_ok {
+                "flat quad present".into()
+            } else {
+                "no flat quad".into()
+            },
         ));
     }
 
@@ -156,7 +190,11 @@ pub fn validate(runtime: &Registry, atlas: &Atlas, store: &SpriteStore) -> Asset
         lines.push((
             "short_grass".into(),
             cross,
-            if cross { "cross quads, tinted".into() } else { "cross geometry/tint missing".into() },
+            if cross {
+                "cross quads, tinted".into()
+            } else {
+                "cross geometry/tint missing".into()
+            },
         ));
     }
 
@@ -173,7 +211,11 @@ pub fn validate(runtime: &Registry, atlas: &Atlas, store: &SpriteStore) -> Asset
         lines.push((
             "vine".into(),
             multipart,
-            if multipart { "multipart appearance".into() } else { "not multipart".into() },
+            if multipart {
+                "multipart appearance".into()
+            } else {
+                "not multipart".into()
+            },
         ));
     }
 
@@ -191,7 +233,11 @@ pub fn validate(runtime: &Registry, atlas: &Atlas, store: &SpriteStore) -> Asset
         lines.push((
             "redstone_wire".into(),
             wire,
-            if wire { "multipart per connection state".into() } else { "not multipart".into() },
+            if wire {
+                "multipart per connection state".into()
+            } else {
+                "not multipart".into()
+            },
         ));
     }
 
@@ -234,7 +280,11 @@ pub fn validate(runtime: &Registry, atlas: &Atlas, store: &SpriteStore) -> Asset
         lines.push((
             "atlas".into(),
             ok,
-            if ok { "oak_log_top packed with correct frame size".into() } else { "atlas entry mismatch".into() },
+            if ok {
+                "oak_log_top packed with correct frame size".into()
+            } else {
+                "atlas entry mismatch".into()
+            },
         ));
     }
 

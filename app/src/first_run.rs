@@ -151,7 +151,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     Ok(pack) => {
                         println!("Imported shader pack \"{}\".", pack.name);
                         println!("  {}", pack.license_summary());
-                        println!("(Shaders stay off until you run `feathered shaders enable <id>`.)");
+                        println!(
+                            "(Shaders stay off until you run `feathered shaders enable <id>`.)"
+                        );
                     }
                     Err(e) => println!("Could not import shader pack: {e}"),
                 }

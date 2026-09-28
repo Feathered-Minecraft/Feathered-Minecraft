@@ -138,9 +138,7 @@ impl Spawner {
             // Per-chunk density cap (live count — no map allocation).
             let chunk_count = entities
                 .iter()
-                .filter(|(_, s)| {
-                    ChunkPos::of_block(s.pos[0] as i64, s.pos[2] as i64) == pos
-                })
+                .filter(|(_, s)| ChunkPos::of_block(s.pos[0] as i64, s.pos[2] as i64) == pos)
                 .count() as u32;
             if chunk_count >= PER_CHUNK_CAP {
                 self.stats.rejected_caps += 1;
@@ -195,11 +193,25 @@ mod tests {
         // Many passes: must stop at the passive cap (daylight=true forces
         // passive spawns only).
         for _ in 0..400 {
-            sp.tick(&mut w, ChunkPos::new(0, 0), [8.0, 10.0, 8.0], 1.0, &loaded, &surface, &solid);
+            sp.tick(
+                &mut w,
+                ChunkPos::new(0, 0),
+                [8.0, 10.0, 8.0],
+                1.0,
+                &loaded,
+                &surface,
+                &solid,
+            );
         }
         let passive = w.iter().filter(|(_, s)| !s.kind.is_hostile()).count() as u32;
-        assert_eq!(passive, PASSIVE_CAP, "cap must hold exactly (got {passive})");
-        assert!(sp.stats.rejected_caps > 0, "extra attempts must be rejected by caps");
+        assert_eq!(
+            passive, PASSIVE_CAP,
+            "cap must hold exactly (got {passive})"
+        );
+        assert!(
+            sp.stats.rejected_caps > 0,
+            "extra attempts must be rejected by caps"
+        );
     }
 
     #[test]
@@ -210,7 +222,15 @@ mod tests {
         let loaded = |_: ChunkPos| false;
         let surface = |_: i64, _: i64| 9i64;
         for _ in 0..100 {
-            sp.tick(&mut w, ChunkPos::new(0, 0), [8.0, 10.0, 8.0], -1.0, &loaded, &surface, &solid);
+            sp.tick(
+                &mut w,
+                ChunkPos::new(0, 0),
+                [8.0, 10.0, 8.0],
+                -1.0,
+                &loaded,
+                &surface,
+                &solid,
+            );
         }
         assert_eq!(w.len(), 0, "unloaded world must spawn nothing");
         assert!(sp.stats.rejected_loaded > 0);
@@ -224,7 +244,15 @@ mod tests {
         let loaded = |_: ChunkPos| true;
         let surface = |_: i64, _: i64| 9i64;
         for _ in 0..100 {
-            let spawned = sp.tick(&mut w, ChunkPos::new(0, 0), [8.0, 10.0, 8.0], -1.0, &loaded, &surface, &solid);
+            let spawned = sp.tick(
+                &mut w,
+                ChunkPos::new(0, 0),
+                [8.0, 10.0, 8.0],
+                -1.0,
+                &loaded,
+                &surface,
+                &solid,
+            );
             for id in spawned {
                 let st = w.get(id).unwrap();
                 let dx = st.pos[0] - 8.0;

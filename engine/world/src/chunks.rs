@@ -20,8 +20,7 @@ pub const CHUNK_Z: u32 = 16;
 /// (the chunk containing block -1 starts at chunk -1, unlike a shift-based
 /// division which would fold it into chunk 0).
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord,
-    serde::Serialize, serde::Deserialize,
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
 )]
 pub struct ChunkPos {
     pub x: i32,
@@ -276,8 +275,14 @@ mod tests {
             let pos = ChunkPos::new(cx, cz);
             let (bx, bz) = pos.min_block();
             assert_eq!(ChunkPos::of_block(bx, bz), pos);
-            assert_eq!(ChunkPos::of_block(bx + CHUNK_X as i64 - 1, bz + CHUNK_Z as i64 - 1), pos);
-            assert_eq!(ChunkPos::of_block(bx + CHUNK_X as i64, bz), ChunkPos::new(cx + 1, cz));
+            assert_eq!(
+                ChunkPos::of_block(bx + CHUNK_X as i64 - 1, bz + CHUNK_Z as i64 - 1),
+                pos
+            );
+            assert_eq!(
+                ChunkPos::of_block(bx + CHUNK_X as i64, bz),
+                ChunkPos::new(cx + 1, cz)
+            );
         }
     }
 

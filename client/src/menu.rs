@@ -11,10 +11,10 @@
 
 use crate::font;
 use crate::overlay::TriList;
-/// Title components (re-exported so `menu::title::…` paths resolve).
-pub use crate::title;
 use crate::profile::{Profile, ProfileStore, Skin};
 use crate::settings::Settings;
+/// Title components (re-exported so `menu::title::…` paths resolve).
+pub use crate::title;
 use crate::ui::{self, Hover, Rect, BUTTON_GAP, BUTTON_H, BUTTON_W};
 use std::path::{Path, PathBuf};
 
@@ -153,8 +153,9 @@ pub enum ServerFocus {
 pub enum ProfileFocus {
     Name,
     None,
-}    /// Cached avatar palette (head/body/legs) for the profile screen.
-    #[derive(Debug, Clone, Copy)]
+}
+/// Cached avatar palette (head/body/legs) for the profile screen.
+#[derive(Debug, Clone, Copy)]
 pub struct SkinPaletteCache {
     pub head: [u8; 4],
     pub body: [u8; 4],
@@ -330,7 +331,7 @@ impl MenuState {
                                     // Human-friendly enough without chrono.
                                     format!("saved {t}")
                                 }
-                                None => "not saved".into()
+                                None => "not saved".into(),
                             }
                         ),
                     ),
@@ -566,7 +567,8 @@ impl MenuState {
                         self.profile.skin = Some(s);
                         self.save_profile();
                         self.refresh_skins();
-                        self.toast = format!("Skin set: {}", self.profile.skin.as_deref().unwrap_or(""));
+                        self.toast =
+                            format!("Skin set: {}", self.profile.skin.as_deref().unwrap_or(""));
                     }
                 }
                 if h.skin_back.map(|r| ui::hit(r, p)).unwrap_or(false) {
@@ -724,7 +726,12 @@ impl MenuState {
 
     /// Route typed text to the focused field. `ch` is a char.
     pub fn type_char(&mut self, ch: char) {
-        match (self.screen, self.focus, self.server_focus, self.profile_focus) {
+        match (
+            self.screen,
+            self.focus,
+            self.server_focus,
+            self.profile_focus,
+        ) {
             (Screen::CreateWorld, Focus::WorldName, ..) => {
                 if self.new_world_name.chars().count() < 32 {
                     self.new_world_name.push(ch);
@@ -755,7 +762,12 @@ impl MenuState {
 
     /// Backspace on the focused field.
     pub fn backspace(&mut self) {
-        match (self.screen, self.focus, self.server_focus, self.profile_focus) {
+        match (
+            self.screen,
+            self.focus,
+            self.server_focus,
+            self.profile_focus,
+        ) {
             (Screen::CreateWorld, Focus::WorldName, ..) => {
                 self.new_world_name.pop();
                 self.new_world_cursor = self.new_world_name.chars().count();
@@ -861,7 +873,14 @@ impl MenuState {
                 title::draw(list, &l, self.logo_art, self.title_sel.min(2));
             }
             Screen::Worlds => {
-                font::draw_text_shadow(list, "SELECT WORLD", cx - font::text_width("SELECT WORLD", 3.0) / 2.0, layout.logo_y(), 3.0, [235, 235, 235, 255]);
+                font::draw_text_shadow(
+                    list,
+                    "SELECT WORLD",
+                    cx - font::text_width("SELECT WORLD", 3.0) / 2.0,
+                    layout.logo_y(),
+                    3.0,
+                    [235, 235, 235, 255],
+                );
                 // Up to 6 world rows.
                 let row_h = 44.0;
                 let row_w = 560.0;
@@ -876,38 +895,141 @@ impl MenuState {
                         Some(e) => (
                             e.dir.clone(),
                             format!("seed {} · {}", e.seed, e.info),
-                            if selected { Hover::Hovered } else { Hover::Idle },
+                            if selected {
+                                Hover::Hovered
+                            } else {
+                                Hover::Idle
+                            },
                         ),
                         None => ("(empty slot)".into(), String::new(), Hover::Disabled),
                     };
                     ui::small_button(list, r, &label, state);
                     if !sub.is_empty() {
-                        font::draw_text_shadow(list, &sub, r[0] + 10.0, r[1] + row_h - 16.0, 1.5, [170, 175, 185, 230]);
+                        font::draw_text_shadow(
+                            list,
+                            &sub,
+                            r[0] + 10.0,
+                            r[1] + row_h - 16.0,
+                            1.5,
+                            [170, 175, 185, 230],
+                        );
                     }
                     self.hits.world_rows[i] = Some(r);
                 }
                 let by = hgt - 3.0 * (BUTTON_H + BUTTON_GAP) - 14.0;
                 let half = (BUTTON_W - BUTTON_GAP) / 2.0;
                 let has_sel = self.world_sel < self.worlds.len();
-                self.hits.world_play = Some(ui::button(list, cx - half / 2.0 - BUTTON_GAP / 2.0, by, half, "PLAY SELECTED", if has_sel { Hover::Idle } else { Hover::Disabled }));
-                self.hits.world_create = Some(ui::button(list, cx + half / 2.0 + BUTTON_GAP / 2.0, by, half, "CREATE NEW WORLD", Hover::Idle));
+                self.hits.world_play = Some(ui::button(
+                    list,
+                    cx - half / 2.0 - BUTTON_GAP / 2.0,
+                    by,
+                    half,
+                    "PLAY SELECTED",
+                    if has_sel {
+                        Hover::Idle
+                    } else {
+                        Hover::Disabled
+                    },
+                ));
+                self.hits.world_create = Some(ui::button(
+                    list,
+                    cx + half / 2.0 + BUTTON_GAP / 2.0,
+                    by,
+                    half,
+                    "CREATE NEW WORLD",
+                    Hover::Idle,
+                ));
                 let by2 = by + BUTTON_H + BUTTON_GAP;
-                self.hits.world_delete = Some(ui::button(list, cx - half / 2.0 - BUTTON_GAP / 2.0, by2, half, "DELETE", if has_sel { Hover::Idle } else { Hover::Disabled }));
-                self.hits.world_back = Some(ui::button(list, cx + half / 2.0 + BUTTON_GAP / 2.0, by2, half, "BACK", Hover::Idle));
+                self.hits.world_delete = Some(ui::button(
+                    list,
+                    cx - half / 2.0 - BUTTON_GAP / 2.0,
+                    by2,
+                    half,
+                    "DELETE",
+                    if has_sel {
+                        Hover::Idle
+                    } else {
+                        Hover::Disabled
+                    },
+                ));
+                self.hits.world_back = Some(ui::button(
+                    list,
+                    cx + half / 2.0 + BUTTON_GAP / 2.0,
+                    by2,
+                    half,
+                    "BACK",
+                    Hover::Idle,
+                ));
             }
             Screen::CreateWorld => {
-                font::draw_text_shadow(list, "CREATE NEW WORLD", cx - font::text_width("CREATE NEW WORLD", 3.0) / 2.0, layout.logo_y(), 3.0, [235, 235, 235, 255]);
+                font::draw_text_shadow(
+                    list,
+                    "CREATE NEW WORLD",
+                    cx - font::text_width("CREATE NEW WORLD", 3.0) / 2.0,
+                    layout.logo_y(),
+                    3.0,
+                    [235, 235, 235, 255],
+                );
                 let y0 = hgt / 2.0 - 80.0;
-                self.hits.create_name = Some(ui::text_field(list, cx, y0, BUTTON_W, "WORLD NAME", &self.new_world_name, self.new_world_cursor, self.focus == Focus::WorldName));
-                self.hits.create_seed = Some(ui::text_field(list, cx, y0 + 60.0, BUTTON_W, "SEED (BLANK = RANDOM, TEXT OK)", &self.new_world_seed_text, self.new_world_seed_cursor, self.focus == Focus::WorldSeed));
+                self.hits.create_name = Some(ui::text_field(
+                    list,
+                    cx,
+                    y0,
+                    BUTTON_W,
+                    "WORLD NAME",
+                    &self.new_world_name,
+                    self.new_world_cursor,
+                    self.focus == Focus::WorldName,
+                ));
+                self.hits.create_seed = Some(ui::text_field(
+                    list,
+                    cx,
+                    y0 + 60.0,
+                    BUTTON_W,
+                    "SEED (BLANK = RANDOM, TEXT OK)",
+                    &self.new_world_seed_text,
+                    self.new_world_seed_cursor,
+                    self.focus == Focus::WorldSeed,
+                ));
                 let half = (BUTTON_W - BUTTON_GAP) / 2.0;
                 let by = y0 + 140.0;
-                self.hits.create_go = Some(ui::button(list, cx - half / 2.0 - BUTTON_GAP / 2.0, by, half, "CREATE", Hover::Idle));
-                self.hits.create_back = Some(ui::button(list, cx + half / 2.0 + BUTTON_GAP / 2.0, by, half, "CANCEL", Hover::Idle));
+                self.hits.create_go = Some(ui::button(
+                    list,
+                    cx - half / 2.0 - BUTTON_GAP / 2.0,
+                    by,
+                    half,
+                    "CREATE",
+                    Hover::Idle,
+                ));
+                self.hits.create_back = Some(ui::button(
+                    list,
+                    cx + half / 2.0 + BUTTON_GAP / 2.0,
+                    by,
+                    half,
+                    "CANCEL",
+                    Hover::Idle,
+                ));
             }
             Screen::Multiplayer => {
-                font::draw_text_shadow(list, "MULTIPLAYER", cx - font::text_width("MULTIPLAYER", 3.0) / 2.0, layout.logo_y(), 3.0, [235, 235, 235, 255]);
-                font::draw_text_shadow(list, "NETWORK PLAY IS NOT IMPLEMENTED YET — SERVERS SAVE FOR LATER", cx - font::text_width("NETWORK PLAY IS NOT IMPLEMENTED YET — SERVERS SAVE FOR LATER", 1.5) / 2.0, layout.logo_y() + 34.0, 1.5, [200, 160, 120, 230]);
+                font::draw_text_shadow(
+                    list,
+                    "MULTIPLAYER",
+                    cx - font::text_width("MULTIPLAYER", 3.0) / 2.0,
+                    layout.logo_y(),
+                    3.0,
+                    [235, 235, 235, 255],
+                );
+                font::draw_text_shadow(
+                    list,
+                    "NETWORK PLAY IS NOT IMPLEMENTED YET — SERVERS SAVE FOR LATER",
+                    cx - font::text_width(
+                        "NETWORK PLAY IS NOT IMPLEMENTED YET — SERVERS SAVE FOR LATER",
+                        1.5,
+                    ) / 2.0,
+                    layout.logo_y() + 34.0,
+                    1.5,
+                    [200, 160, 120, 230],
+                );
                 let row_h = 44.0;
                 let row_w = 560.0;
                 for i in 0..self.hits.server_rows.len() {
@@ -918,45 +1040,152 @@ impl MenuState {
                         Some(s) => (
                             s.name.clone(),
                             s.address.clone(),
-                            if selected { Hover::Hovered } else { Hover::Idle },
+                            if selected {
+                                Hover::Hovered
+                            } else {
+                                Hover::Idle
+                            },
                         ),
                         None => ("(no server)".into(), String::new(), Hover::Disabled),
                     };
                     ui::small_button(list, r, &label, state);
                     if !sub.is_empty() {
-                        font::draw_text_shadow(list, &sub, r[0] + 10.0, r[1] + row_h - 16.0, 1.5, [170, 175, 185, 230]);
+                        font::draw_text_shadow(
+                            list,
+                            &sub,
+                            r[0] + 10.0,
+                            r[1] + row_h - 16.0,
+                            1.5,
+                            [170, 175, 185, 230],
+                        );
                     }
                     self.hits.server_rows[i] = Some(r);
                 }
                 let by = hgt - 3.0 * (BUTTON_H + BUTTON_GAP) - 14.0;
                 let third = (BUTTON_W - 2.0 * BUTTON_GAP) / 3.0;
                 let has_sel = self.server_sel < self.servers.len();
-                self.hits.server_join = Some(ui::button(list, cx - third, by, third, "JOIN", if has_sel { Hover::Idle } else { Hover::Disabled }));
-                self.hits.server_add = Some(ui::button(list, cx, by, third, "ADD SERVER", Hover::Idle));
-                self.hits.server_delete = Some(ui::button(list, cx + third, by, third, "DELETE", if has_sel { Hover::Idle } else { Hover::Disabled }));
-                self.hits.server_back = Some(ui::button(list, cx, by + BUTTON_H + BUTTON_GAP, BUTTON_W, "BACK", Hover::Idle));
+                self.hits.server_join = Some(ui::button(
+                    list,
+                    cx - third,
+                    by,
+                    third,
+                    "JOIN",
+                    if has_sel {
+                        Hover::Idle
+                    } else {
+                        Hover::Disabled
+                    },
+                ));
+                self.hits.server_add =
+                    Some(ui::button(list, cx, by, third, "ADD SERVER", Hover::Idle));
+                self.hits.server_delete = Some(ui::button(
+                    list,
+                    cx + third,
+                    by,
+                    third,
+                    "DELETE",
+                    if has_sel {
+                        Hover::Idle
+                    } else {
+                        Hover::Disabled
+                    },
+                ));
+                self.hits.server_back = Some(ui::button(
+                    list,
+                    cx,
+                    by + BUTTON_H + BUTTON_GAP,
+                    BUTTON_W,
+                    "BACK",
+                    Hover::Idle,
+                ));
             }
             Screen::AddServer => {
-                font::draw_text_shadow(list, "ADD SERVER", cx - font::text_width("ADD SERVER", 3.0) / 2.0, layout.logo_y(), 3.0, [235, 235, 235, 255]);
+                font::draw_text_shadow(
+                    list,
+                    "ADD SERVER",
+                    cx - font::text_width("ADD SERVER", 3.0) / 2.0,
+                    layout.logo_y(),
+                    3.0,
+                    [235, 235, 235, 255],
+                );
                 let y0 = hgt / 2.0 - 80.0;
-                self.hits.add_name = Some(ui::text_field(list, cx, y0, BUTTON_W, "SERVER NAME", &self.new_server_name, self.new_server_name_cursor, self.server_focus == ServerFocus::Name));
-                self.hits.add_addr = Some(ui::text_field(list, cx, y0 + 60.0, BUTTON_W, "SERVER ADDRESS", &self.new_server_addr, self.new_server_addr_cursor, self.server_focus == ServerFocus::Address));
+                self.hits.add_name = Some(ui::text_field(
+                    list,
+                    cx,
+                    y0,
+                    BUTTON_W,
+                    "SERVER NAME",
+                    &self.new_server_name,
+                    self.new_server_name_cursor,
+                    self.server_focus == ServerFocus::Name,
+                ));
+                self.hits.add_addr = Some(ui::text_field(
+                    list,
+                    cx,
+                    y0 + 60.0,
+                    BUTTON_W,
+                    "SERVER ADDRESS",
+                    &self.new_server_addr,
+                    self.new_server_addr_cursor,
+                    self.server_focus == ServerFocus::Address,
+                ));
                 let half = (BUTTON_W - BUTTON_GAP) / 2.0;
                 let by = y0 + 140.0;
-                self.hits.add_go = Some(ui::button(list, cx - half / 2.0 - BUTTON_GAP / 2.0, by, half, "DONE", Hover::Idle));
-                self.hits.add_back = Some(ui::button(list, cx + half / 2.0 + BUTTON_GAP / 2.0, by, half, "CANCEL", Hover::Idle));
+                self.hits.add_go = Some(ui::button(
+                    list,
+                    cx - half / 2.0 - BUTTON_GAP / 2.0,
+                    by,
+                    half,
+                    "DONE",
+                    Hover::Idle,
+                ));
+                self.hits.add_back = Some(ui::button(
+                    list,
+                    cx + half / 2.0 + BUTTON_GAP / 2.0,
+                    by,
+                    half,
+                    "CANCEL",
+                    Hover::Idle,
+                ));
             }
             Screen::Settings => {
-                font::draw_text_shadow(list, "OPTIONS", cx - font::text_width("OPTIONS", 3.0) / 2.0, layout.logo_y(), 3.0, [235, 235, 235, 255]);
+                font::draw_text_shadow(
+                    list,
+                    "OPTIONS",
+                    cx - font::text_width("OPTIONS", 3.0) / 2.0,
+                    layout.logo_y(),
+                    3.0,
+                    [235, 235, 235, 255],
+                );
                 let row_w = 560.0;
                 let row_h = 40.0;
                 let labels = [
                     ("RENDER QUALITY", self.settings.quality.clone(), true),
-                    ("MOUSE SENSITIVITY", format!("{:.1}x", self.settings.sensitivity), true),
+                    (
+                        "MOUSE SENSITIVITY",
+                        format!("{:.1}x", self.settings.sensitivity),
+                        true,
+                    ),
                     ("FIELD OF VIEW", format!("{:.0}", self.settings.fov), true),
-                    ("VIEW DISTANCE", format!("{} CHUNKS", self.settings.view_distance), true),
-                    ("DAY LENGTH", format!("{} S", self.settings.day_length as u32), true),
-                    ("HUD", if self.settings.hud { "SHOWN".into() } else { "HIDDEN".into() }, false),
+                    (
+                        "VIEW DISTANCE",
+                        format!("{} CHUNKS", self.settings.view_distance),
+                        true,
+                    ),
+                    (
+                        "DAY LENGTH",
+                        format!("{} S", self.settings.day_length as u32),
+                        true,
+                    ),
+                    (
+                        "HUD",
+                        if self.settings.hud {
+                            "SHOWN".into()
+                        } else {
+                            "HIDDEN".into()
+                        },
+                        false,
+                    ),
                 ];
                 for (i, (label, value, arrows)) in labels.iter().enumerate() {
                     let y = layout.logo_y() + 60.0 + i as f32 * (row_h + 6.0);
@@ -972,30 +1201,112 @@ impl MenuState {
                 // title screen is exactly Play / Settings / Quit).
                 let links_y = layout.logo_y() + 60.0 + 6.0 * (row_h + 6.0) + 10.0;
                 let link_w = 260.0;
-                self.hits.profile = Some(ui::button(list, cx - link_w / 2.0 - 8.0, links_y, link_w, "PROFILE / SKINS", Hover::Idle));
-                self.hits.multiplayer = Some(ui::button(list, cx + link_w / 2.0 + 8.0, links_y, link_w, "MULTIPLAYER SERVERS", Hover::Idle));
-                self.hits.settings_back = Some(ui::button(list, cx, hgt - BUTTON_H - 20.0, BUTTON_W, "DONE", Hover::Idle));
+                self.hits.profile = Some(ui::button(
+                    list,
+                    cx - link_w / 2.0 - 8.0,
+                    links_y,
+                    link_w,
+                    "PROFILE / SKINS",
+                    Hover::Idle,
+                ));
+                self.hits.multiplayer = Some(ui::button(
+                    list,
+                    cx + link_w / 2.0 + 8.0,
+                    links_y,
+                    link_w,
+                    "MULTIPLAYER SERVERS",
+                    Hover::Idle,
+                ));
+                self.hits.settings_back = Some(ui::button(
+                    list,
+                    cx,
+                    hgt - BUTTON_H - 20.0,
+                    BUTTON_W,
+                    "DONE",
+                    Hover::Idle,
+                ));
             }
             Screen::Profile => {
-                font::draw_text_shadow(list, "PROFILE", cx - font::text_width("PROFILE", 3.0) / 2.0, layout.logo_y(), 3.0, [235, 235, 235, 255]);
+                font::draw_text_shadow(
+                    list,
+                    "PROFILE",
+                    cx - font::text_width("PROFILE", 3.0) / 2.0,
+                    layout.logo_y(),
+                    3.0,
+                    [235, 235, 235, 255],
+                );
                 // Avatar preview from the palette (blocky front view).
                 let ax = cx - 150.0;
                 let ay = hgt / 2.0 - 110.0;
                 if let Some(p) = self.preview {
                     draw_avatar(list, ax, ay, p);
                 } else {
-                    font::draw_text_shadow(list, "NO SKIN SET", ax, ay + 40.0, 1.5, [170, 175, 185, 230]);
+                    font::draw_text_shadow(
+                        list,
+                        "NO SKIN SET",
+                        ax,
+                        ay + 40.0,
+                        1.5,
+                        [170, 175, 185, 230],
+                    );
                 }
-                self.hits.profile_name = Some(ui::text_field(list, cx + 90.0, hgt / 2.0 - 60.0, 320.0, "PLAYER NAME", &self.profile.name, self.profile_name_cursor, self.profile_focus == ProfileFocus::Name));
-                self.hits.profile_skins = Some(ui::button(list, cx + 90.0, hgt / 2.0 + 10.0, 320.0, "CHOOSE SKIN...", Hover::Idle));
-                font::draw_text_shadow(list, "DROP MINECRAFT SKIN PNGS (64X64 / 64X32) INTO THE SKINS FOLDER", cx - font::text_width("DROP MINECRAFT SKIN PNGS (64X64 / 64X32) INTO THE SKINS FOLDER", 1.2) / 2.0, hgt - 60.0, 1.2, [170, 175, 185, 220]);
-                self.hits.profile_back = Some(ui::button(list, cx, hgt - BUTTON_H - 20.0, BUTTON_W, "SAVE + BACK", Hover::Idle));
+                self.hits.profile_name = Some(ui::text_field(
+                    list,
+                    cx + 90.0,
+                    hgt / 2.0 - 60.0,
+                    320.0,
+                    "PLAYER NAME",
+                    &self.profile.name,
+                    self.profile_name_cursor,
+                    self.profile_focus == ProfileFocus::Name,
+                ));
+                self.hits.profile_skins = Some(ui::button(
+                    list,
+                    cx + 90.0,
+                    hgt / 2.0 + 10.0,
+                    320.0,
+                    "CHOOSE SKIN...",
+                    Hover::Idle,
+                ));
+                font::draw_text_shadow(
+                    list,
+                    "DROP MINECRAFT SKIN PNGS (64X64 / 64X32) INTO THE SKINS FOLDER",
+                    cx - font::text_width(
+                        "DROP MINECRAFT SKIN PNGS (64X64 / 64X32) INTO THE SKINS FOLDER",
+                        1.2,
+                    ) / 2.0,
+                    hgt - 60.0,
+                    1.2,
+                    [170, 175, 185, 220],
+                );
+                self.hits.profile_back = Some(ui::button(
+                    list,
+                    cx,
+                    hgt - BUTTON_H - 20.0,
+                    BUTTON_W,
+                    "SAVE + BACK",
+                    Hover::Idle,
+                ));
                 if !self.toast.is_empty() {
-                    font::draw_text_shadow(list, &self.toast, cx - font::text_width(&self.toast, 1.5) / 2.0, hgt - 90.0, 1.5, [255, 220, 140, 240]);
+                    font::draw_text_shadow(
+                        list,
+                        &self.toast,
+                        cx - font::text_width(&self.toast, 1.5) / 2.0,
+                        hgt - 90.0,
+                        1.5,
+                        [255, 220, 140, 240],
+                    );
                 }
             }
             Screen::Skins => {
-                font::draw_text_shadow(list, "CHOOSE SKIN", cx - font::text_width("CHOOSE SKIN", 3.0) / 2.0, layout.logo_y(), 3.0, [235, 235, 235, 255]);
+                font::draw_text_shadow(
+                    list,
+                    "CHOOSE SKIN",
+                    cx - font::text_width("CHOOSE SKIN", 3.0) / 2.0,
+                    layout.logo_y(),
+                    3.0,
+                    [235, 235, 235, 255],
+                );
                 let row_h = 44.0;
                 for i in 0..self.hits.skin_rows.len() {
                     let y = layout.logo_y() + 60.0 + i as f32 * (row_h + 6.0);
@@ -1004,7 +1315,11 @@ impl MenuState {
                     let (label, state) = match self.skins.get(i) {
                         Some(name) => (
                             name.clone(),
-                            if selected { Hover::Hovered } else { Hover::Idle },
+                            if selected {
+                                Hover::Hovered
+                            } else {
+                                Hover::Idle
+                            },
                         ),
                         None => ("(no skins yet)".into(), Hover::Disabled),
                     };
@@ -1014,8 +1329,26 @@ impl MenuState {
                 let by = hgt - 2.0 * (BUTTON_H + BUTTON_GAP) - 14.0;
                 let half = (BUTTON_W - BUTTON_GAP) / 2.0;
                 let has_sel = self.skin_sel < self.skins.len();
-                self.hits.skin_use = Some(ui::button(list, cx - half / 2.0 - BUTTON_GAP / 2.0, by, half, "USE SKIN", if has_sel { Hover::Idle } else { Hover::Disabled }));
-                self.hits.skin_back = Some(ui::button(list, cx + half / 2.0 + BUTTON_GAP / 2.0, by, half, "BACK", Hover::Idle));
+                self.hits.skin_use = Some(ui::button(
+                    list,
+                    cx - half / 2.0 - BUTTON_GAP / 2.0,
+                    by,
+                    half,
+                    "USE SKIN",
+                    if has_sel {
+                        Hover::Idle
+                    } else {
+                        Hover::Disabled
+                    },
+                ));
+                self.hits.skin_back = Some(ui::button(
+                    list,
+                    cx + half / 2.0 + BUTTON_GAP / 2.0,
+                    by,
+                    half,
+                    "BACK",
+                    Hover::Idle,
+                ));
             }
         }
     }
@@ -1029,15 +1362,39 @@ fn draw_avatar(list: &mut TriList, x: f32, y: f32, p: SkinPaletteCache) {
     let torso_h = 56.0f32;
     let leg_h = 52.0f32;
     // Head.
-    list.quad([x, y], [x + head, y], [x + head, y + head], [x, y + head], p.head);
+    list.quad(
+        [x, y],
+        [x + head, y],
+        [x + head, y + head],
+        [x, y + head],
+        p.head,
+    );
     // Torso.
     let ty = y + head + 2.0;
-    list.quad([x, ty], [x + torso_w, ty], [x + torso_w, ty + torso_h], [x, ty + torso_h], p.body);
+    list.quad(
+        [x, ty],
+        [x + torso_w, ty],
+        [x + torso_w, ty + torso_h],
+        [x, ty + torso_h],
+        p.body,
+    );
     // Legs.
     let ly = ty + torso_h;
     let leg_w = torso_w / 2.0;
-    list.quad([x, ly], [x + leg_w, ly], [x + leg_w, ly + leg_h], [x, ly + leg_h], p.legs);
-    list.quad([x + leg_w, ly], [x + torso_w, ly], [x + torso_w, ly + leg_h], [x + leg_w, ly + leg_h], p.legs);
+    list.quad(
+        [x, ly],
+        [x + leg_w, ly],
+        [x + leg_w, ly + leg_h],
+        [x, ly + leg_h],
+        p.legs,
+    );
+    list.quad(
+        [x + leg_w, ly],
+        [x + torso_w, ly],
+        [x + torso_w, ly + leg_h],
+        [x + leg_w, ly + leg_h],
+        p.legs,
+    );
 }
 
 /// Sanitize a world name into a directory name.

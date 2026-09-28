@@ -33,8 +33,14 @@ pub type LightLevels = [u8; 2];
 fn emitter_level(name: &str) -> u8 {
     match name {
         "torch" | "soul_torch" | "redstone_torch" | "lantern" | "sea_lantern" => 14,
-        "glowstone" | "shroomlight" | "ochre_froglight" | "verdant_froglight"
-        | "pearlescent_froglight" | "jack_o_lantern" | "campfire" | "soul_lantern" => 15,
+        "glowstone"
+        | "shroomlight"
+        | "ochre_froglight"
+        | "verdant_froglight"
+        | "pearlescent_froglight"
+        | "jack_o_lantern"
+        | "campfire"
+        | "soul_lantern" => 15,
         "end_rod" | "candle" | "beacon" | "conduit" | "respawn_anchor" | "magma_block" => 15,
         "fire" | "soul_fire" | "furnace" | "redstone_lamp" | "crying_obsidian" => 15,
         "lava" => 15,
@@ -161,7 +167,9 @@ pub fn compute_window(
     for y in y0..y1 {
         for z in z0..z1 {
             for x in x0..x1 {
-                let Some((id, _sid)) = world.get(x, y, z) else { continue };
+                let Some((id, _sid)) = world.get(x, y, z) else {
+                    continue;
+                };
                 if id == 0 {
                     continue;
                 }
@@ -267,12 +275,7 @@ impl LightGrid {
     /// Compute sky + block light for the whole flat world (Phase-1 scenes).
     pub fn compute(world: &World, registry: &Registry) -> LightGrid {
         let [sx, sy, sz] = world.size.map(|s| s as i64);
-        compute_window(
-            world,
-            &LightRules { registry },
-            [0, 0, 0],
-            [sx, sy, sz],
-        )
+        compute_window(world, &LightRules { registry }, [0, 0, 0], [sx, sy, sz])
     }
 
     /// Light levels at one voxel; `None` outside the grid.

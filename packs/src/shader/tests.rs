@@ -7,9 +7,21 @@ use std::io::Write;
 fn write_optifine_pack(root: &Path, with_props: bool) -> PathBuf {
     let shaders = root.join("shaders");
     std::fs::create_dir_all(&shaders).unwrap();
-    std::fs::write(shaders.join("terrain.vsh"), b"#version 150\nvoid main() {}\n").unwrap();
-    std::fs::write(shaders.join("terrain.fsh"), b"#version 150\nvoid main() {}\n").unwrap();
-    std::fs::write(shaders.join("composite.fsh"), b"#version 150\nvoid main() {}\n").unwrap();
+    std::fs::write(
+        shaders.join("terrain.vsh"),
+        b"#version 150\nvoid main() {}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        shaders.join("terrain.fsh"),
+        b"#version 150\nvoid main() {}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        shaders.join("composite.fsh"),
+        b"#version 150\nvoid main() {}\n",
+    )
+    .unwrap();
     if with_props {
         std::fs::write(
             shaders.join("shaders.properties"),
@@ -40,11 +52,17 @@ fn import_folder_detects_optifine_layout_and_engine_claims() {
     let pack = mgr.import_folder(&src).unwrap();
     assert_eq!(pack.profile, ShaderLayout::OptifineStyle);
     assert_eq!(pack.engines.len(), 2, "both engine claims parsed");
-    assert!(pack.engines.iter().any(|e| e.engine == "Iris" && e.min_version.as_deref() == Some("1.6")));
+    assert!(pack
+        .engines
+        .iter()
+        .any(|e| e.engine == "Iris" && e.min_version.as_deref() == Some("1.6")));
     // License summary must NOT claim the pack is GPL or otherwise licensed.
     let summary = pack.license_summary();
     assert!(summary.contains("Third-party"), "summary: {summary}");
-    assert!(!summary.to_lowercase().contains("gpl"), "must not guess a license");
+    assert!(
+        !summary.to_lowercase().contains("gpl"),
+        "must not guess a license"
+    );
 }
 
 #[test]
@@ -64,8 +82,14 @@ fn import_zip_extracts_wrapped_shaders_dir() {
     write_zip(
         &zip_path,
         &[
-            ("FancyShaders/shaders/terrain.vsh", b"void main(){}".as_slice()),
-            ("FancyShaders/shaders/terrain.fsh", b"void main(){}".as_slice()),
+            (
+                "FancyShaders/shaders/terrain.vsh",
+                b"void main(){}".as_slice(),
+            ),
+            (
+                "FancyShaders/shaders/terrain.fsh",
+                b"void main(){}".as_slice(),
+            ),
         ],
     );
     let pack = mgr.import_zip(&zip_path).unwrap();
@@ -90,13 +114,23 @@ fn license_file_is_preserved_not_relicensed() {
     let mgr = ShaderPackManager::open_at(tmp.path().join("shaders"));
     let src = tmp.path().join("LicensedPack");
     write_optifine_pack(&src, false);
-    std::fs::write(src.join("LICENSE"), "Custom Shader License 1.0\nAll rights reserved.\n").unwrap();
+    std::fs::write(
+        src.join("LICENSE"),
+        "Custom Shader License 1.0\nAll rights reserved.\n",
+    )
+    .unwrap();
 
     let pack = mgr.import_folder(&src).unwrap();
     let lic = pack.license_file().expect("license file found");
     let text = std::fs::read_to_string(&lic).unwrap();
-    assert!(text.contains("Custom Shader License 1.0"), "verbatim preservation");
-    assert!(pack.license_summary().contains("LICENSE"), "summary points at the pack's own file");
+    assert!(
+        text.contains("Custom Shader License 1.0"),
+        "verbatim preservation"
+    );
+    assert!(
+        pack.license_summary().contains("LICENSE"),
+        "summary points at the pack's own file"
+    );
 }
 
 #[test]

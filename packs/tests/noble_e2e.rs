@@ -35,7 +35,9 @@ fn real_noble_properties_translate_through_the_manager() {
         .import_folder(&src)
         .expect("the real Noble pack imports");
     assert!(
-        pack.engines.iter().any(|e| e.engine.starts_with("iris.features")),
+        pack.engines
+            .iter()
+            .any(|e| e.engine.starts_with("iris.features")),
         "Noble declares iris.features.required; got {:?}",
         pack.engines
     );
@@ -44,8 +46,14 @@ fn real_noble_properties_translate_through_the_manager() {
     let translated = feathered_packs::translate_shader_config(&pack.dir, RenderQuality::Ultra)
         .expect("Noble's properties translate");
     // The upstream default profile enables the heavy stages.
-    assert!(translated.config.shadows.is_some(), "Noble enables shadows by default");
-    assert!(translated.config.atmosphere.is_some(), "Noble enables atmosphere by default");
+    assert!(
+        translated.config.shadows.is_some(),
+        "Noble enables shadows by default"
+    );
+    assert!(
+        translated.config.atmosphere.is_some(),
+        "Noble enables atmosphere by default"
+    );
     // And reports what cannot be translated instead of faking it.
     assert!(
         !translated.unsupported.is_empty(),
@@ -60,5 +68,8 @@ fn real_noble_properties_translate_through_the_manager() {
     // 3) The staged pipeline accepts the translated config (validates every
     // knob landed inside the renderer's accepted ranges).
     let staged = translated.config.uses_staged_pipeline();
-    assert!(staged, "translated Noble config must drive the staged pipeline");
+    assert!(
+        staged,
+        "translated Noble config must drive the staged pipeline"
+    );
 }

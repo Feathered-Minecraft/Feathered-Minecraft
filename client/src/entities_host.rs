@@ -15,8 +15,8 @@
 //! AI only reads a snapshot of the player's position.
 
 use feathered_entity::ai::{self, GoalSelector, MobCtx};
-use feathered_entity::world::{EntityId, EntityWorld, MobState};
 use feathered_entity::spawn::Spawner;
+use feathered_entity::world::{EntityId, EntityWorld, MobState};
 use feathered_world::chunks::ChunkPos;
 use feathered_world::physics;
 
@@ -86,13 +86,7 @@ impl EntityHost {
 
         // 1. Spawning (internally budgeted by ATTEMPTS_PER_TICK).
         spawner.tick(
-            entities,
-            center,
-            player_pos,
-            daylight,
-            loaded,
-            surface_at,
-            solid,
+            entities, center, player_pos, daylight, loaded, surface_at, solid,
         );
 
         // 2. AI + 3. physics for active entities only. Collect intent via a
@@ -116,9 +110,9 @@ impl EntityHost {
             let (dx, dz) = (player_pos[0] - state.pos[0], player_pos[2] - state.pos[2]);
             let dist = (dx * dx + dz * dz).sqrt();
             // Brain for this slot (created on first sight).
-            let entry = brains.entry(id.index).or_insert_with(|| {
-                (feathered_entity::mobs::brain(state.kind), [0.0; 4])
-            });
+            let entry = brains
+                .entry(id.index)
+                .or_insert_with(|| (feathered_entity::mobs::brain(state.kind), [0.0; 4]));
             let (sel, scratch) = (&mut entry.0, &mut entry.1);
             // Feed the player position for chase/flee goals.
             scratch[2] = player_pos[0];

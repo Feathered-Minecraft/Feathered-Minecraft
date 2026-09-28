@@ -75,7 +75,10 @@ pub fn discover(base: &Path) -> AssetResult<PackIndex> {
     // alphabetical keeps output stable.
     packs.sort_by(|a, b| a.root.cmp(&b.root));
 
-    let mut index = PackIndex { packs, ..Default::default() };
+    let mut index = PackIndex {
+        packs,
+        ..Default::default()
+    };
     for pack in &index.packs.clone() {
         for (ns_path, namespace) in namespace_dirs(&pack.root) {
             for entry in walk(&ns_path) {
@@ -89,7 +92,9 @@ pub fn discover(base: &Path) -> AssetResult<PackIndex> {
                 }
                 // Strip the final extension: `textures/block/stone.png` -> `textures/block/stone`
                 let stem = match rel.rsplit_once('.') {
-                    Some((stem, ext)) if !ext.is_empty() && !stem.ends_with('.') => stem.to_string(),
+                    Some((stem, ext)) if !ext.is_empty() && !stem.ends_with('.') => {
+                        stem.to_string()
+                    }
                     _ => rel.clone(),
                 };
                 let key = (namespace.clone(), stem);
@@ -132,19 +137,13 @@ fn namespace_dirs(root: &Path) -> Vec<(PathBuf, String)> {
         if !p.is_dir() {
             continue;
         }
-        let name = entry
-            .file_name()
-            .to_string_lossy()
-            .into_owned();
+        let name = entry.file_name().to_string_lossy().into_owned();
         if name == "assets" {
             // Standard layout: namespaces live one level deeper.
             if let Ok(ns_entries) = std::fs::read_dir(&p) {
                 for ns in ns_entries.flatten() {
                     if ns.path().is_dir() {
-                        let ns_name = ns
-                            .file_name()
-                            .to_string_lossy()
-                            .into_owned();
+                        let ns_name = ns.file_name().to_string_lossy().into_owned();
                         out.push((ns.path(), ns_name));
                     }
                 }
@@ -161,7 +160,9 @@ fn walk(dir: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let mut stack = vec![dir.to_path_buf()];
     while let Some(d) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(&d) else { continue };
+        let Ok(entries) = std::fs::read_dir(&d) else {
+            continue;
+        };
         for entry in entries.flatten() {
             let p = entry.path();
             if p.is_dir() {

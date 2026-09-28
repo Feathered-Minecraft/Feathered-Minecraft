@@ -50,7 +50,11 @@ impl SpriteStore {
         let texture_files: Vec<((String, String), std::path::PathBuf)> = index
             .files
             .iter()
-            .filter(|(_, path)| path.to_string_lossy().replace('\\', "/").contains("/textures/"))
+            .filter(|(_, path)| {
+                path.to_string_lossy()
+                    .replace('\\', "/")
+                    .contains("/textures/")
+            })
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
 
@@ -62,9 +66,7 @@ impl SpriteStore {
                 let name = path.strip_prefix("textures/").unwrap_or(path.as_str());
                 // Skip sidecars (their stem ends in `.png`), fonts, and any
                 // non-image payloads.
-                if name.ends_with(".mcmeta")
-                    || name.ends_with(".png")
-                    || name.starts_with("font/")
+                if name.ends_with(".mcmeta") || name.ends_with(".png") || name.starts_with("font/")
                 {
                     return None;
                 }
@@ -94,17 +96,19 @@ impl SpriteStore {
 
 /// Decode one texture and resolve its animation strip layout.
 fn load_sprite(index: &PackIndex, ns: &str, name: &str) -> AssetResult<Sprite> {
-    let file = index.get(ns, &format!("textures/{name}")).ok_or_else(|| AssetError {
-        path: format!("{ns}:textures/{name}"),
-        message: "texture file missing".into(),
-    })?;
+    let file = index
+        .get(ns, &format!("textures/{name}"))
+        .ok_or_else(|| AssetError {
+            path: format!("{ns}:textures/{name}"),
+            message: "texture file missing".into(),
+        })?;
 
     // Sidecar lookup. Discovery strips one extension, so `foo.png.mcmeta`
     // lives under the index key `textures/foo.png`.
     let sidecar_key = format!("textures/{name}.png");
-    let mcmeta_path = index.get(ns, &sidecar_key).filter(|p| {
-        p.to_string_lossy().ends_with(".mcmeta")
-    });
+    let mcmeta_path = index
+        .get(ns, &sidecar_key)
+        .filter(|p| p.to_string_lossy().ends_with(".mcmeta"));
     let (tex_meta, anim_raw) = match mcmeta_path {
         Some(p) => {
             let json = std::fs::read_to_string(p).map_err(|e| AssetError {
@@ -138,7 +142,13 @@ fn load_sprite(index: &PackIndex, ns: &str, name: &str) -> AssetResult<Sprite> {
         None => (tex.width, tex.height, None),
     };
 
-    Ok(Sprite { name: (ns.to_string(), name.to_string()), tex, frame_w, frame_h, animation })
+    Ok(Sprite {
+        name: (ns.to_string(), name.to_string()),
+        tex,
+        frame_w,
+        frame_h,
+        animation,
+    })
 }
 
 /// Test-visible wrapper for animation finalization.

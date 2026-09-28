@@ -67,7 +67,11 @@ impl Skin {
         let get = |x: u32, y: u32| -> [u8; 4] {
             let p = rgba.get_pixel(x, y).0;
             // Fully transparent texels read as "absent".
-            if p[3] == 0 { [0, 0, 0, 0] } else { p }
+            if p[3] == 0 {
+                [0, 0, 0, 0]
+            } else {
+                p
+            }
         };
 
         // Head: 8×8 at (8,8) — same in both layouts.
@@ -94,7 +98,11 @@ impl Skin {
                 legs.push(get(4 + x, 20 + y)); // right leg
             }
             for x in 0..4u32 {
-                legs.push(if h == 64 { get(20 + x, 52 + y) } else { get(4 + x, 20 + y) });
+                legs.push(if h == 64 {
+                    get(20 + x, 52 + y)
+                } else {
+                    get(4 + x, 20 + y)
+                });
             }
         }
         Ok(Skin { head, body, legs })
@@ -127,7 +135,8 @@ impl Skin {
     pub fn palette(&self) -> SkinPalette {
         let head_face: Vec<[u8; 4]> = {
             // Rows 2..6 are the face band of the 8×8 head.
-            (2..6).flat_map(|y| (0..8).map(move |x| y * 8 + x))
+            (2..6)
+                .flat_map(|y| (0..8).map(move |x| y * 8 + x))
                 .map(|i| self.head[i])
                 .collect()
         };
@@ -348,7 +357,9 @@ mod tests {
         assert_eq!(store.load(), p);
 
         // Import a real skin.
-        let stored = store.import_skin("my skin!.png", &sample_skin_64()).unwrap();
+        let stored = store
+            .import_skin("my skin!.png", &sample_skin_64())
+            .unwrap();
         assert_eq!(stored, "my skin.png", "sanitized name");
         assert_eq!(store.list_skins(), vec!["my skin.png".to_string()]);
         assert!(store.read_skin("my skin.png").is_ok());

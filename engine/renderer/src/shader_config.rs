@@ -182,10 +182,8 @@ impl ExposureConfig {
     /// (sensorSensitivity; the 12.5 calibration constant cancels into it),
     /// `exposure = 2^-EV`.
     pub fn exposure_scale(&self) -> f32 {
-        let ev100 = ((self.f_stops * self.f_stops)
-            * self.shutter_speed
-            * (100.0 / self.iso))
-            .log2();
+        let ev100 =
+            ((self.f_stops * self.f_stops) * self.shutter_speed * (100.0 / self.iso)).log2();
         2.0f32.powf(-ev100)
     }
 }
@@ -220,7 +218,11 @@ impl ShaderEffectConfig {
                     samples: 4,
                     strength: 0.9,
                 }),
-                Some(AoConfig { slices: 2, radius: 3.0, strength: 0.7 }),
+                Some(AoConfig {
+                    slices: 2,
+                    radius: 3.0,
+                    strength: 0.7,
+                }),
                 Some(AtmosphereConfig {
                     rayleigh: [5.8e-6, 13.5e-6, 33.1e-6],
                     mie: 21e-6,
@@ -245,7 +247,10 @@ impl ShaderEffectConfig {
                     absorption: [0.45, 0.08, 0.03],
                     reflection_strength: 0.6,
                 }),
-                Some(FogConfig { density: 0.0015, tint: [0.9, 0.95, 1.0] }),
+                Some(FogConfig {
+                    density: 0.0015,
+                    tint: [0.9, 0.95, 1.0],
+                }),
                 Some(PostConfig {
                     bloom: true,
                     bloom_threshold: 1.0,
@@ -253,7 +258,11 @@ impl ShaderEffectConfig {
                     tonemap: Tonemap::Aces,
                     vignette: 0.2,
                 }),
-                Some(ExposureConfig { f_stops: 8.0, shutter_speed: 125.0, iso: 200.0 }),
+                Some(ExposureConfig {
+                    f_stops: 8.0,
+                    shutter_speed: 125.0,
+                    iso: 200.0,
+                }),
             ),
             RenderQuality::Ultra => (
                 Some(ShadowConfig {
@@ -262,7 +271,11 @@ impl ShaderEffectConfig {
                     samples: 8,
                     strength: 1.0,
                 }),
-                Some(AoConfig { slices: 4, radius: 4.0, strength: 0.85 }),
+                Some(AoConfig {
+                    slices: 4,
+                    radius: 4.0,
+                    strength: 0.85,
+                }),
                 Some(AtmosphereConfig {
                     rayleigh: [5.8e-6, 13.5e-6, 33.1e-6],
                     mie: 21e-6,
@@ -287,7 +300,10 @@ impl ShaderEffectConfig {
                     absorption: [0.45, 0.08, 0.03],
                     reflection_strength: 0.75,
                 }),
-                Some(FogConfig { density: 0.0025, tint: [0.9, 0.95, 1.0] }),
+                Some(FogConfig {
+                    density: 0.0025,
+                    tint: [0.9, 0.95, 1.0],
+                }),
                 Some(PostConfig {
                     bloom: true,
                     bloom_threshold: 0.85,
@@ -295,7 +311,11 @@ impl ShaderEffectConfig {
                     tonemap: Tonemap::Aces,
                     vignette: 0.25,
                 }),
-                Some(ExposureConfig { f_stops: 8.0, shutter_speed: 125.0, iso: 200.0 }),
+                Some(ExposureConfig {
+                    f_stops: 8.0,
+                    shutter_speed: 125.0,
+                    iso: 200.0,
+                }),
             ),
         };
         ShaderEffectConfig {
@@ -325,7 +345,11 @@ mod tests {
     #[test]
     fn exposure_matches_noble_fixed_mode() {
         // N=8, t=1/125, ISO 200 → EV100 = log2(64·125·0.5) = log2(4000) ≈ 11.97
-        let e = ExposureConfig { f_stops: 8.0, shutter_speed: 125.0, iso: 200.0 };
+        let e = ExposureConfig {
+            f_stops: 8.0,
+            shutter_speed: 125.0,
+            iso: 200.0,
+        };
         let ev = ((8.0f32 * 8.0) * 125.0 * (100.0 / 200.0)).log2();
         let expected = 2.0f32.powf(-ev);
         assert!((e.exposure_scale() - expected).abs() < 1e-6);

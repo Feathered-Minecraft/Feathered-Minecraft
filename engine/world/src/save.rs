@@ -149,14 +149,17 @@ pub fn decode(bytes: &[u8]) -> Result<WorldSave, String> {
     let mut off = MAGIC.len();
     let version = read_u32(bytes, &mut off).ok_or("truncated version")?;
     if version != FORMAT_VERSION {
-        return Err(format!("unsupported save format version {version} (expected {FORMAT_VERSION})"));
+        return Err(format!(
+            "unsupported save format version {version} (expected {FORMAT_VERSION})"
+        ));
     }
     let meta_len = read_u32(bytes, &mut off).ok_or("truncated meta length")? as usize;
     let meta_end = off
         .checked_add(meta_len)
         .filter(|&e| e <= bytes.len())
         .ok_or("truncated metadata")?;
-    let meta: WorldMeta = serde_json::from_slice(&bytes[off..meta_end]).map_err(|e| e.to_string())?;
+    let meta: WorldMeta =
+        serde_json::from_slice(&bytes[off..meta_end]).map_err(|e| e.to_string())?;
     off = meta_end;
 
     let count = read_u32(bytes, &mut off).ok_or("truncated edit count")? as usize;
@@ -168,7 +171,9 @@ pub fn decode(bytes: &[u8]) -> Result<WorldSave, String> {
         let block = read_u32(bytes, &mut off).ok_or("truncated edit")?;
         let state = read_u32(bytes, &mut off).ok_or("truncated edit")?;
         if block == 0 && state != 0 {
-            return Err(format!("invalid edit (air with state {state}) at {x},{y},{z}"));
+            return Err(format!(
+                "invalid edit (air with state {state}) at {x},{y},{z}"
+            ));
         }
         edits.insert((x, y, z), (block, state));
     }
@@ -347,7 +352,8 @@ mod tests {
 
     #[test]
     fn load_missing_file_reports_cleanly() {
-        let dir = std::env::temp_dir().join(format!("feathered-save-missing-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("feathered-save-missing-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         assert!(load_from_dir(&dir).is_err());
         assert!(!exists(&dir));

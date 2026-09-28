@@ -101,9 +101,7 @@ impl Predicate {
             Predicate::Always => true,
             Predicate::And(ps) => ps.iter().all(|p| p.matches(props)),
             Predicate::Or(ps) => ps.iter().any(|p| p.matches(props)),
-            Predicate::Match(k, v) => {
-                props.iter().any(|(pk, pv)| pk == k && value_matches(v, pv))
-            }
+            Predicate::Match(k, v) => props.iter().any(|(pk, pv)| pk == k && value_matches(v, pv)),
         }
     }
 }
@@ -150,7 +148,9 @@ pub struct PropertySchema {
 // ---------------------------------------------------------------------------
 
 /// Parse `blockstates/*.json` from the index.
-pub fn load_raw(index: &crate::pack::PackIndex) -> AssetResult<HashMap<(String, String), RawBlockstate>> {
+pub fn load_raw(
+    index: &crate::pack::PackIndex,
+) -> AssetResult<HashMap<(String, String), RawBlockstate>> {
     let mut out = HashMap::new();
     for ((ns, path), file) in &index.files {
         // Index keys are extension-stripped; JSON-ness was decided at discovery.
@@ -167,7 +167,9 @@ pub fn load_raw(index: &crate::pack::PackIndex) -> AssetResult<HashMap<(String, 
         })?;
         let key = (
             ns.clone(),
-            path.strip_prefix("blockstates/").unwrap_or(path).to_string(),
+            path.strip_prefix("blockstates/")
+                .unwrap_or(path)
+                .to_string(),
         );
         out.insert(key, bs);
     }
@@ -180,7 +182,9 @@ pub fn extract_schema(raw: &RawBlockstate) -> PropertySchema {
     if let Some(variants) = &raw.variants {
         for key in variants.keys() {
             for pair in key.split(',') {
-                let Some((k, v)) = pair.split_once('=') else { continue };
+                let Some((k, v)) = pair.split_once('=') else {
+                    continue;
+                };
                 let k = k.trim().to_string();
                 let v = v.trim().to_string();
                 let entry = props.entry(k).or_default();
@@ -230,7 +234,9 @@ fn collect_when_values(when: &serde_json::Value, props: &mut HashMap<String, Vec
 
 /// Compile a `when` JSON into a Predicate.
 pub fn compile_when(when: Option<&serde_json::Value>) -> Predicate {
-    let Some(when) = when else { return Predicate::Always };
+    let Some(when) = when else {
+        return Predicate::Always;
+    };
     compile_when_value(when)
 }
 
@@ -269,7 +275,10 @@ fn compile_when_value(when: &serde_json::Value) -> Predicate {
 }
 
 /// Compile variants into entries, preserving declaration order.
-pub fn compile_variants(raw: &RawBlockstate, resolve_model: &mut impl FnMut(&str) -> ModelId) -> AssetResult<StateAppearance> {
+pub fn compile_variants(
+    raw: &RawBlockstate,
+    resolve_model: &mut impl FnMut(&str) -> ModelId,
+) -> AssetResult<StateAppearance> {
     let Some(variants) = &raw.variants else {
         return crate::error::err("blockstate", "no variants section");
     };
@@ -320,7 +329,10 @@ fn variant_key_predicate(key: &str) -> Predicate {
 }
 
 /// Compile multipart parts.
-pub fn compile_multipart(raw: &RawBlockstate, resolve_model: &mut impl FnMut(&str) -> ModelId) -> AssetResult<StateAppearance> {
+pub fn compile_multipart(
+    raw: &RawBlockstate,
+    resolve_model: &mut impl FnMut(&str) -> ModelId,
+) -> AssetResult<StateAppearance> {
     let Some(parts) = &raw.multipart else {
         return crate::error::err("blockstate", "no multipart section");
     };
@@ -380,7 +392,9 @@ pub fn classify_occlusion(quads: &[crate::models::FaceQuad]) -> Occlusion {
     for q in quads {
         // Full cube face: spans the full 0..16 range on its plane's axes.
         let b = q.bounds;
-        let full = (b[0] <= 0.01 && b[3] >= 15.99) || (b[1] <= 0.01 && b[4] >= 15.99) || (b[2] <= 0.01 && b[5] >= 15.99);
+        let full = (b[0] <= 0.01 && b[3] >= 15.99)
+            || (b[1] <= 0.01 && b[4] >= 15.99)
+            || (b[2] <= 0.01 && b[5] >= 15.99);
         let aligned = match q.dir {
             Direction::Down | Direction::Up => b[1] <= 0.01 || b[4] >= 15.99,
             Direction::North | Direction::South => b[2] <= 0.01 || b[5] >= 15.99,

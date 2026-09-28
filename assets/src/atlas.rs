@@ -8,7 +8,7 @@
 //! instead of expanding frames into separate atlas entries.
 
 use crate::error::{AssetError, AssetResult};
-use crate::sprites::{Sprite, SpriteStore, SpriteRef};
+use crate::sprites::{Sprite, SpriteRef, SpriteStore};
 use std::collections::HashMap;
 
 pub const GUTTER: u32 = 1;
@@ -99,7 +99,12 @@ struct ShelfPacker {
 
 impl ShelfPacker {
     fn new(width: u32) -> Self {
-        Self { width, y: 0, row_h: 0, row_x: 0 }
+        Self {
+            width,
+            y: 0,
+            row_h: 0,
+            row_x: 0,
+        }
     }
 
     fn place(&mut self, w: u32, h: u32) -> Option<(u32, u32)> {
@@ -162,7 +167,11 @@ pub fn build(store: &SpriteStore, sprite_names: &[SpriteRef]) -> AssetResult<Atl
                 continue 'grow;
             }
             let frames = sprite.frame_count();
-            let frame_h = if frames > 1 { sprite.frame_h } else { sprite.tex.height };
+            let frame_h = if frames > 1 {
+                sprite.frame_h
+            } else {
+                sprite.tex.height
+            };
             placed.push((
                 (**name).clone(),
                 AtlasEntry {
