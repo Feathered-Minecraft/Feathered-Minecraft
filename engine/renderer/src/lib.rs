@@ -583,11 +583,16 @@ impl OverlayState {
         let _ = globals_bind; // bound per-frame (shared); kept for clarity
 
         // Separate buffer pairs per pass: both are written every frame.
+        // The vertex capacity is in HudVertex units (32 B — the same stride
+        // grow_and_upload uses; it was 24 here, undersizing the initial
+        // buffers by 25% so a full title-screen draw list overran them).
+        let hud_vert_bytes = std::mem::size_of::<client_overlay::HudVertex>() as u64;
+        debug_assert_eq!(hud_vert_bytes, 32);
         let mk_bufs = |label: &'static str| {
             (
                 device.create_buffer(&wgpu::BufferDescriptor {
                     label: Some(label),
-                    size: (Self::INITIAL_VERTS * 24) as u64,
+                    size: Self::INITIAL_VERTS as u64 * hud_vert_bytes,
                     usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
                     mapped_at_creation: false,
                 }),
@@ -1801,16 +1806,20 @@ impl Renderer {
             return;
         }
 
-        // Direct path: straight into the target.
+        // Direct path: straight into the target. The scene draw and the
+        // outline overlay share one depth buffer: the capture outline
+        // pipeline declares a Depth32Float attachment, so a queued outline
+        // with no depth view would make that render pass invalid (wgpu
+        // validation error). Window targets reuse the persistent depth.
+        let depth_view = if to_window {
+            self.depth_view.clone()
+        } else {
+            // Capture target without staging: give it its own depth.
+            Self::make_depth(&self.device, 1280, 720)
+                .create_view(&wgpu::TextureViewDescriptor::default())
+        };
         {
             let color_atts = [Some(Self::color_attachment(view))];
-            let depth_view = if to_window {
-                self.depth_view.clone()
-            } else {
-                // Capture target without staging: give it its own depth.
-                let d = Self::make_depth(&self.device, 1280, 720);
-                d.create_view(&wgpu::TextureViewDescriptor::default())
-            };
             let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("main"),
                 multiview_mask: None,
@@ -1826,12 +1835,7 @@ impl Renderer {
             };
             self.record_scene(&mut rpass, meshes, pipes);
         }
-        let direct_depth = if to_window {
-            Some(self.depth_view.clone())
-        } else {
-            None
-        };
-        self.record_overlays(encoder, view, direct_depth.as_ref(), to_window);
+        self.record_overlays(encoder, view, Some(&depth_view), to_window);
     }
 
     /// Frame dimensions for window vs capture targets.
