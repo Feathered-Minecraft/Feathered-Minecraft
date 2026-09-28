@@ -534,6 +534,7 @@ dependencies = [
  "bytemuck",
  "feathered-assets",
  "feathered-chunk",
+ "feathered-entity",
  "feathered-packs",
  "feathered-renderer",
  "feathered-world",
@@ -543,6 +544,15 @@ dependencies = [
  "serde",
  "serde_json",
  "winit",
+]
+
+[[package]]
+name = "feathered-entity"
+version = "0.1.0"
+dependencies = [
+ "feathered-world",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -19,7 +19,10 @@ pub const CHUNK_Z: u32 = 16;
 /// size, so negative block coordinates map to negative chunk coordinates
 /// (the chunk containing block -1 starts at chunk -1, unlike a shift-based
 /// division which would fold it into chunk 0).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord,
+    serde::Serialize, serde::Deserialize,
+)]
 pub struct ChunkPos {
     pub x: i32,
     pub z: i32,

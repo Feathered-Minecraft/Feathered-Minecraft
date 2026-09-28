@@ -1,0 +1,12 @@
+[package]
+name = "feathered-entity"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+feathered-world.workspace = true
+serde.workspace = true
+serde_json.workspace = true

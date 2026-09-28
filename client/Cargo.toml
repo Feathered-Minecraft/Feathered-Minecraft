@@ -14,6 +14,7 @@ serde_json.workspace = true
 feathered-renderer.workspace = true
 feathered-chunk.workspace = true
 feathered-world.workspace = true
+feathered-entity.workspace = true
 feathered-assets.workspace = true
 feathered-packs.workspace = true
 winit.workspace = true
