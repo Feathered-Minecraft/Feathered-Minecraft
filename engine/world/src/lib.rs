@@ -10,6 +10,7 @@ pub mod physics;
 pub mod raycast;
 pub mod save;
 pub mod terrain;
+pub mod worldgen;
 
 pub use chunks::{Chunk, ChunkPos, ChunkedWorld};
 pub use light::LightGrid;
