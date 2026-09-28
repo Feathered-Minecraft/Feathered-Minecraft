@@ -1567,6 +1567,19 @@ impl ApplicationHandler for App {
 
     fn about_to_wait(&mut self, event_loop: &dyn ActiveEventLoop) {
         let Some(state) = &mut self.state else { return };
+
+        // Drive the loop continuously while a session exists: without this
+        // the loop idles in `Wait` and simulation/frames only advanced when
+        // the OS delivered an event (mouse movement, key repeat...) — the
+        // game crawled whenever input was still. `Poll` wakes us every pass;
+        // the redraw request schedules the present. (winit coalesces
+        // multiple requests, so this is the idiomatic continuous-render
+        // pattern for this version.)
+        event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
+        if let Some(w) = &state.window {
+            w.request_redraw();
+        }
+
         let now = std::time::Instant::now();
         let dt = now.duration_since(state.last_tick).as_secs_f32();
         state.last_tick = now;
