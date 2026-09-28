@@ -86,6 +86,36 @@ impl TriList {
             .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
     }
 
+    /// Push one 2D quad with per-corner colors (a=bottom-left, b=bottom-
+    /// right, c=top-right, d=top-left). The overlay pipeline's linear color
+    /// interpolation makes this a smooth gradient — the title screen's fade
+    /// panel is one of these instead of a stack of per-column quads (no
+    /// banding). Corners in the same order as [`Self::quad`].
+    pub fn quad_gradient(
+        &mut self,
+        a: [f32; 2],
+        b: [f32; 2],
+        c: [f32; 2],
+        d: [f32; 2],
+        ca: [u8; 4],
+        cb: [u8; 4],
+        cc: [u8; 4],
+        cd: [u8; 4],
+    ) {
+        let base = self.vertices.len() as u32;
+        let z = 0.0;
+        for (p, color) in [(a, ca), (b, cb), (c, cc), (d, cd)] {
+            self.vertices.push(HudVertex {
+                pos: [p[0], p[1], z],
+                color,
+                px: [-1.0, 0.0],
+                uv: [0.0; 2],
+            });
+        }
+        self.indices
+            .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+    }
+
     /// True when nothing has been authored into this list.
     pub fn is_empty(&self) -> bool {
         self.indices.is_empty()
@@ -366,6 +396,30 @@ impl TriList {
         }
         self.indices
             .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+    }
+}
+
+/// Public world-space beam: a hollow rectangular tube of half-thickness
+/// `t` around the segment a→b (exactly one axis may differ; used by the
+/// block outline and the entity debug boxes).
+pub fn beam3(list: &mut TriList, a: [f32; 3], b: [f32; 3], t: f32, color: [u8; 4]) {
+    let (ax, ay, az) = (a[0], a[1], a[2]);
+    let (bx, by, bz) = (b[0], b[1], b[2]);
+    if ax != bx {
+        list.quad3([ax, ay - t, az - t], [bx, ay - t, az - t], [bx, ay - t, az + t], [ax, ay - t, az + t], color);
+        list.quad3([ax, ay + t, az - t], [bx, ay + t, az - t], [bx, ay + t, az + t], [ax, ay + t, az + t], color);
+        list.quad3([ax, ay - t, az - t], [bx, ay - t, az - t], [bx, ay + t, az - t], [ax, ay + t, az - t], color);
+        list.quad3([ax, ay - t, az + t], [bx, ay - t, az + t], [bx, ay + t, az + t], [ax, ay + t, az + t], color);
+    } else if ay != by {
+        list.quad3([ax - t, ay, az - t], [bx + t, ay, az - t], [bx + t, by, az - t], [ax - t, by, az - t], color);
+        list.quad3([ax - t, ay, az + t], [bx + t, ay, az + t], [bx + t, by, az + t], [ax - t, by, az + t], color);
+        list.quad3([ax - t, ay, az - t], [ax - t, ay, az + t], [ax - t, by, az + t], [ax - t, by, az - t], color);
+        list.quad3([bx + t, ay, az - t], [bx + t, ay, az + t], [bx + t, by, az + t], [bx + t, by, az - t], color);
+    } else {
+        list.quad3([ax - t, ay - t, az], [bx + t, ay - t, az], [bx + t, ay - t, bz], [ax - t, ay - t, bz], color);
+        list.quad3([ax - t, ay + t, az], [bx + t, ay + t, az], [bx + t, ay + t, bz], [ax - t, ay + t, bz], color);
+        list.quad3([ax - t, ay - t, az], [ax - t, ay + t, az], [ax - t, ay + t, bz], [ax - t, ay - t, bz], color);
+        list.quad3([bx + t, ay - t, az], [bx + t, ay + t, az], [bx + t, ay + t, bz], [bx + t, ay - t, bz], color);
     }
 }
 

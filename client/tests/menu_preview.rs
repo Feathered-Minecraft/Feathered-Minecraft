@@ -30,9 +30,9 @@ fn headless_renderer() -> feathered_renderer::Renderer {
 }
 
 fn save_png(path: &str, frame: &[u8], w: u32, h: u32) {
-    // Workspace root (client/ is one level deep): two climbs from the
-    // manifest dir land on <root>/target.
-    let full = format!("{}/../../{}", env!("CARGO_MANIFEST_DIR"), path);
+    // Workspace root (client/ is one level deep): one climb from the
+    // manifest dir lands on <root>, so `target/...` paths stay in-repo.
+    let full = format!("{}/../{}", env!("CARGO_MANIFEST_DIR"), path);
     if let Some(parent) = std::path::Path::new(&full).parent() {
         let _ = std::fs::create_dir_all(parent);
     }
@@ -105,8 +105,9 @@ fn menu_title_preview() {
     assert_eq!(r.frame_size(), (W, H));
     save_png("target/menu-ui-preview.png", &frame, W, H);
 
-    // Fade panel: left edge near-black; right side lighter (fade eases out
-    // over the sky clear color). No background.png in tests → sky shows.
+    // Gradient overlay: the left edge must be much darker than the right
+    // (the ease-out reveals the sky/world), while staying translucent by
+    // design — the dark base is [8,10,13] at alpha ~0.96 over the sky.
     let px = |x: u32, y: u32| {
         let i = ((y * W + x) * 4) as usize;
         [frame[i], frame[i + 1], frame[i + 2]]
@@ -116,13 +117,18 @@ fn menu_title_preview() {
     let ll = left.iter().map(|&c| c as u32).sum::<u32>();
     let rl = right.iter().map(|&c| c as u32).sum::<u32>();
     assert!(
-        ll < 100,
-        "fade left edge should be near-black, got {left:?}"
+        ll < 180,
+        "gradient left edge should read near-black over the sky, got {left:?}"
     );
     assert!(
-        rl > ll,
-        "fade should ease out to the right (left {left:?} vs right {right:?})"
+        rl > ll + 250,
+        "gradient must ease out to the right (left {left:?} vs right {right:?})"
     );
+    // No hard vertical cutoff: the midpoint of the ease must sit strictly
+    // between the edges (a rectangular panel would clamp at full black).
+    let mid = px(900, 360);
+    let ml = mid.iter().map(|&c| c as u32).sum::<u32>();
+    assert!(ml > ll && ml < rl, "gradient must transition smoothly (left {ll}, mid {ml}, right {rl})");
     // Feather band upper-left: brighter than the panel (white art + tint).
     let feather = px(120, 120);
     let fl = feather.iter().map(|&c| c as u32).sum::<u32>();

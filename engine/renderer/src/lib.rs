@@ -884,6 +884,11 @@ pub struct Renderer {
     /// Day fraction (0..1) the client drives for the day/night cycle. `None`
     /// keeps the configured/pack sun angle (Phase-2 behavior).
     day_fraction: Option<f32>,
+    /// Absolute sun phase override (0..1). When set it wins over both the
+    /// client's day cycle and the shader config's sun angle — the title
+    /// screen pins its golden-hour backdrop with this. Cleared when a
+    /// world starts so gameplay follows the day cycle again.
+    sun_phase_override: Option<f32>,
     /// Server-tick counter from the client (drives animation + day cycle).
     tick: u64,
     /// HUD + overlay GPU state (None until the first `set_overlay`).
@@ -1354,6 +1359,7 @@ impl Renderer {
             mesh_lighting: None,
             chunks: Default::default(),
             day_fraction: None,
+            sun_phase_override: None,
             tick: 0,
             overlay: None,
             pending_overlay: None,
@@ -1727,9 +1733,14 @@ impl Renderer {
         // Day/night cycle: the client supplies a day fraction (0..1); the
         // configured sun_angle becomes the phase within it. Without a cycle
         // (tests, captures) the configured angle is used directly.
-        let sun_angle = match self.day_fraction {
-            Some(day) => (day + config.sun_angle).fract(),
-            None => config.sun_angle,
+        // Title-backdrop override first: an absolute phase wins over both
+        // the day cycle and the configured/pack sun angle.
+        let sun_angle = match self.sun_phase_override {
+            Some(p) => p,
+            None => match self.day_fraction {
+                Some(day) => (day + config.sun_angle).fract(),
+                None => config.sun_angle,
+            },
         };
         let (sun, elev) = sun_state(sun_angle, config.sun_path_rotation_deg);
         let mut flags = 0u32;
@@ -2450,10 +2461,25 @@ impl Renderer {
         self.chunks.remove(&pos);
     }
 
+    /// Drop every streamed chunk's GPU buffers (world transitions: the
+    /// new session's streamer re-uploads as it loads — stale meshes must
+    /// never survive a menu → world switch).
+    pub fn clear_chunks(&mut self) {
+        self.chunks.clear();
+    }
+
     /// Enable the day/night cycle at `fraction` (0..1: 0 sunrise, 0.25 noon,
     /// 0.5 sunset, 0.75 midnight). Pass `None` to pin the configured sun.
     pub fn set_day_fraction(&mut self, fraction: Option<f32>) {
         self.day_fraction = fraction.map(|f| f.rem_euclid(1.0));
+    }
+
+    /// Pin the sun to an absolute phase (0..1 through the day), overriding
+    /// both the client's day cycle and the shader config's sun angle —
+    /// the title screen's golden-hour backdrop. `None` restores normal
+    /// behavior (day cycle / configured angle).
+    pub fn set_sun_phase_override(&mut self, phase: Option<f32>) {
+        self.sun_phase_override = phase.map(|p| p.rem_euclid(1.0));
     }
 
     /// Number of streamed chunks currently uploaded.

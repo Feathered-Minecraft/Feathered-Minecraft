@@ -11,6 +11,8 @@
 
 use crate::font;
 use crate::overlay::TriList;
+/// Title components (re-exported so `menu::title::…` paths resolve).
+pub use crate::title;
 use crate::profile::{Profile, ProfileStore, Skin};
 use crate::settings::Settings;
 use crate::ui::{self, Hover, Rect, BUTTON_GAP, BUTTON_H, BUTTON_W};
@@ -58,6 +60,9 @@ pub enum MenuAction {
     JoinServer(String),
     /// Quality changed live (app re-applies to the renderer).
     QualityChanged(String),
+    /// Open an external URL (footer links). The app validates against the
+    /// title module's whitelist before invoking the OS handler.
+    OpenUrl(String),
     Quit,
 }
 
@@ -91,6 +96,8 @@ pub struct MenuState {
     pub new_world_seed_cursor: usize,
     /// Which field has keyboard focus on CreateWorld.
     pub focus: Focus,
+    /// Keyboard/hover selection index on the title menu (Play = 0 default).
+    pub title_sel: usize,
     /// Multiplayer server list.
     pub servers: Vec<ServerEntry>,
     pub server_sel: usize,
@@ -123,6 +130,9 @@ pub struct MenuState {
     pub background: bool,
     /// Last computed widget rects (rebuilt each draw).
     hits: Hits,
+    /// Title layout from the last draw (hit-testing source of truth; draw
+    /// always precedes input for a frame, and it matches what is visible).
+    pub last_title_layout: Option<title::TitleLayout>,
     /// Cached skin preview palette.
     pub preview: Option<SkinPaletteCache>,
 }
@@ -152,14 +162,12 @@ pub struct SkinPaletteCache {
 }
 
 /// Widget rects captured during the last draw (hit-testing input).
+/// (The title screen hit-tests its own layout; these serve sub-screens.
+/// `profile`/`multiplayer` double as the Settings screen's link buttons.)
 #[derive(Debug, Default, Clone, Copy)]
 struct Hits {
-    // Title
-    singleplayer: Option<Rect>,
-    multiplayer: Option<Rect>,
-    settings: Option<Rect>,
     profile: Option<Rect>,
-    quit: Option<Rect>,
+    multiplayer: Option<Rect>,
     // Worlds
     world_rows: [Option<Rect>; 6],
     world_play: Option<Rect>,
@@ -271,6 +279,7 @@ impl MenuState {
             new_world_seed_text: String::new(),
             new_world_seed_cursor: 0,
             focus: Focus::WorldName,
+            title_sel: 0,
             servers: Vec::new(),
             server_sel: usize::MAX,
             new_server_name: String::new(),
@@ -291,6 +300,7 @@ impl MenuState {
             logo_art: None,
             background: false,
             hits: Hits::default(),
+            last_title_layout: None,
             preview: None,
         }
     }
@@ -385,20 +395,28 @@ impl MenuState {
         let h = self.hits;
         match self.screen {
             Screen::Title => {
-                if h.singleplayer.map(|r| ui::hit(r, p)).unwrap_or(false) {
-                    self.scan_worlds(worlds_dir);
-                    self.screen = Screen::Worlds;
-                } else if h.multiplayer.map(|r| ui::hit(r, p)).unwrap_or(false) {
-                    self.load_servers(worlds_dir);
-                    self.screen = Screen::Multiplayer;
-                } else if h.settings.map(|r| ui::hit(r, p)).unwrap_or(false) {
-                    self.screen = Screen::Settings;
-                } else if h.profile.map(|r| ui::hit(r, p)).unwrap_or(false) {
-                    self.refresh_skins();
-                    self.profile_name_cursor = self.profile.name.chars().count();
-                    self.screen = Screen::Profile;
-                } else if h.quit.map(|r| ui::hit(r, p)).unwrap_or(false) {
-                    return MenuAction::Quit;
+                // Hitboxes come straight from the drawn title layout —
+                // identical to the visible rows (mouse can never miss or
+                // phantom-hit). First click selects, second activates.
+                let Some(l) = self.last_title_layout.clone() else {
+                    return MenuAction::None;
+                };
+                let sel = self.title_sel.min(2);
+                for i in 0..l.rows.len() {
+                    let r = l.row_hit_rect(i, i == sel);
+                    if ui::hit(r, p) {
+                        if i == sel {
+                            // Click on the already-selected row: activate.
+                            return self.activate_title(i);
+                        }
+                        self.title_sel = i;
+                        break;
+                    }
+                }
+                for (i, r) in l.footer.iter().enumerate() {
+                    if ui::hit(*r, p) {
+                        return MenuAction::OpenUrl(title::ALLOWED_URLS[i].to_string());
+                    }
                 }
             }
             Screen::Worlds => {
@@ -507,6 +525,15 @@ impl MenuState {
                         }
                     }
                 }
+                if h.profile.map(|r| ui::hit(r, p)).unwrap_or(false) {
+                    self.refresh_skins();
+                    self.profile_name_cursor = self.profile.name.chars().count();
+                    self.screen = Screen::Profile;
+                }
+                if h.multiplayer.map(|r| ui::hit(r, p)).unwrap_or(false) {
+                    self.load_servers(worlds_dir);
+                    self.screen = Screen::Multiplayer;
+                }
                 if h.settings_back.map(|r| ui::hit(r, p)).unwrap_or(false) {
                     self.save_settings();
                     self.screen = Screen::Title;
@@ -548,6 +575,26 @@ impl MenuState {
             }
         }
         MenuAction::None
+    }
+
+    /// Activate title entry `i` (routing only — visuals live in title.rs).
+    fn activate_title(&mut self, i: usize) -> MenuAction {
+        match i {
+            0 => {
+                self.scan_worlds_dir();
+                self.screen = Screen::Worlds;
+            }
+            1 => self.screen = Screen::Settings,
+            2 => return MenuAction::Quit,
+            _ => {}
+        }
+        MenuAction::None
+    }
+
+    /// Scan worlds using the stored settings dir (click-path helper).
+    fn scan_worlds_dir(&mut self) {
+        let dir = self.settings_dir.clone();
+        self.scan_worlds(&dir);
     }
 
     /// Settings row click: left/right arrows or row toggle.
@@ -766,6 +813,17 @@ impl MenuState {
         }
     }
 
+    /// Title keyboard navigation: move selection, activate with Enter/Space.
+    pub fn title_move(&mut self, delta: isize) {
+        let n = title::MENU_ENTRIES.len();
+        self.title_sel = ((self.title_sel as isize + delta).rem_euclid(n as isize)) as usize;
+    }
+
+    /// Activate the currently selected title entry (Enter / Space).
+    pub fn title_activate(&mut self) -> MenuAction {
+        self.activate_title(self.title_sel.min(2))
+    }
+
     /// Enter on a form screen: submit it (CreateWorld / AddServer).
     pub fn confirm(&mut self, worlds_dir: &Path) -> MenuAction {
         match self.screen {
@@ -794,127 +852,13 @@ impl MenuState {
         let cx = layout.cx();
         match self.screen {
             Screen::Title => {
-                // Full-screen background image (background.png) when the app
-                // loaded one; the fallback texture is transparent so the sky
-                // shows through until then.
-                if self.background {
-                    list.background_quad(
-                        [0.0, 0.0],
-                        [w, 0.0],
-                        [w, hgt],
-                        [0.0, hgt],
-                        lin4([255, 255, 255, 255]),
-                    );
-                }
-                // The fade: opaque on the left where the brand + menu live,
-                // easing out to the right so the art reads. Held ~55% then
-                // eased (the mock's panel stays dark under the whole menu).
-                let steps = 24;
-                let panel_w = w * 0.66;
-                let step_w = panel_w / steps as f32;
-                for i in 0..steps {
-                    let t = i as f32 / steps as f32;
-                    let a: u8 = if t < 0.55 {
-                        252
-                    } else {
-                        (252.0 * (1.0 - (t - 0.55) / 0.45)) as u8
-                    };
-                    list.quad(
-                        [i as f32 * step_w, 0.0],
-                        [(i + 1) as f32 * step_w, 0.0],
-                        [(i + 1) as f32 * step_w, hgt],
-                        [i as f32 * step_w, hgt],
-                        lin4([10, 12, 16, a]),
-                    );
-                }
-                // Feather art (white on transparency) upper-left; the
-                // transparent canvas padding shows the panel behind.
-                if let Some(art) = self.logo_art {
-                    let art_h = hgt * 0.32;
-                    let art_w = art_h * art;
-                    let (ax, ay) = (18.0, 40.0);
-                    list.textured_quad(
-                        [ax, ay],
-                        [ax + art_w, ay],
-                        [ax + art_w, ay + art_h],
-                        [ax, ay + art_h],
-                        lin4([250, 250, 252, 255]),
-                    );
-                }
-                draw_branding(list, w, hgt);
-                // Hover feedback: brighten the entry under the cursor.
-                let hover = |r: [f32; 4]| {
-                    if ui::hit(r, self.cursor) {
-                        Hover::Hovered
-                    } else {
-                        Hover::Idle
-                    }
-                };
-                // Icon menu (reference): box icon + label + underline rule.
-                let menu_x = 20.0;
-                let row_h = 52.0;
-                let row_w = 236.0;
-                let icon = 34.0;
-                let y0 = hgt * 0.50;
-                type IconFn = fn(f32, f32, f32, f32, &mut TriList, [u8; 4]);
-                let rows: [(&str, &str, IconFn); 3] = [
-                    ("singleplayer", "Play", draw_icon_play),
-                    ("settings", "Settings", draw_icon_gear),
-                    ("quit", "Quit", draw_icon_power),
-                ];
-                for (i, (key, label, icon_fn)) in rows.iter().enumerate() {
-                    let y = y0 + i as f32 * (row_h + 10.0);
-                    let r = [menu_x, y, row_w, row_h];
-                    let (face, glyph) = if hover(r) == Hover::Hovered {
-                        (lin4([34, 37, 44, 220]), lin4([250, 250, 250, 255]))
-                    } else {
-                        (lin4([22, 24, 28, 200]), lin4([225, 228, 232, 255]))
-                    };
-                    // Left-edge diamond node (the mock's dotted rail).
-                    let dcx = menu_x - 12.0;
-                    let dcy = y + row_h / 2.0;
-                    let d = 4.0;
-                    list.quad(
-                        [dcx - d, dcy],
-                        [dcx, dcy - d],
-                        [dcx + d, dcy],
-                        [dcx, dcy + d],
-                        lin4([150, 155, 165, 220]),
-                    );
-                    // Icon box + glyph.
-                    list.quad([r[0], r[1]], [r[0] + icon, r[1]], [r[0] + icon, r[1] + icon], [r[0], r[1] + icon], face);
-                    icon_fn(r[0] + 7.0, r[1] + 7.0, icon - 14.0, icon - 14.0, list, glyph);
-                    // Label + underline rule.
-                    font::draw_text_shadow(list, label, r[0] + icon + 14.0, r[1] + (icon - 7.0 * 2.0) / 2.0, 2.0, glyph);
-                    let ly = r[1] + row_h - 2.0;
-                    list.quad(
-                        [r[0], ly],
-                        [r[0] + row_w, ly],
-                        [r[0] + row_w, ly + 2.0],
-                        [r[0], ly + 2.0],
-                        if hover(r) == Hover::Hovered { lin4([235, 238, 242, 230]) } else { lin4([80, 84, 92, 190]) },
-                    );
-                    let slot = match *key {
-                        "singleplayer" => &mut self.hits.singleplayer,
-                        "settings" => &mut self.hits.settings,
-                        _ => &mut self.hits.quit,
-                    };
-                    *slot = Some(r);
-                }
-                // Bottom-left version block.
-                font::draw_text_shadow(list, "v1.0.0", 18.0, hgt - 44.0, 2.5, lin4([235, 235, 235, 255]));
-                font::draw_text_shadow(list, "Feathered Minecraft", 18.0, hgt - 18.0, 1.5, lin4([150, 155, 165, 235]));
-                // Bottom-right links: MULTIPLAYER · PROFILE (and the
-                // not-affiliated note on the far right, mock's link row).
-                let link_y = hgt - 20.0;
-                let lx = w - 18.0 - font::text_width("NOT AFFILIATED WITH MOJANG", 1.5);
-                font::draw_text_shadow(list, "NOT AFFILIATED WITH MOJANG", lx, link_y, 1.5, lin4([120, 126, 136, 210]));
-                let profile_rect = [lx - 90.0, link_y - 4.0, 80.0, 18.0];
-                self.hits.profile = Some(profile_rect);
-                font::draw_text_shadow(list, "PROFILE", profile_rect[0] + 8.0, link_y, 1.5, lin4([225, 228, 235, 240]));
-                let mp_rect = [profile_rect[0] - 150.0, link_y - 4.0, 140.0, 18.0];
-                self.hits.multiplayer = Some(mp_rect);
-                font::draw_text_shadow(list, "MULTIPLAYER", mp_rect[0] + 8.0, link_y, 1.5, lin4([225, 228, 235, 240]));
+                // The title screen is the component UI (title.rs): live
+                // voxel world behind, GPU gradient overlay, brand, rail,
+                // three rows, version + footer. Hit-testing reuses the same
+                // layout instance stored here.
+                let l = title::TitleLayout::build(w, hgt);
+                self.last_title_layout = Some(l);
+                title::draw(list, &l, self.logo_art, self.title_sel.min(2));
             }
             Screen::Worlds => {
                 font::draw_text_shadow(list, "SELECT WORLD", cx - font::text_width("SELECT WORLD", 3.0) / 2.0, layout.logo_y(), 3.0, [235, 235, 235, 255]);
@@ -1024,6 +968,12 @@ impl MenuState {
                         let _ = (l, rt);
                     }
                 }
+                // Profile + multiplayer stay reachable from Settings (the
+                // title screen is exactly Play / Settings / Quit).
+                let links_y = layout.logo_y() + 60.0 + 6.0 * (row_h + 6.0) + 10.0;
+                let link_w = 260.0;
+                self.hits.profile = Some(ui::button(list, cx - link_w / 2.0 - 8.0, links_y, link_w, "PROFILE / SKINS", Hover::Idle));
+                self.hits.multiplayer = Some(ui::button(list, cx + link_w / 2.0 + 8.0, links_y, link_w, "MULTIPLAYER SERVERS", Hover::Idle));
                 self.hits.settings_back = Some(ui::button(list, cx, hgt - BUTTON_H - 20.0, BUTTON_W, "DONE", Hover::Idle));
             }
             Screen::Profile => {
@@ -1090,64 +1040,6 @@ fn draw_avatar(list: &mut TriList, x: f32, y: f32, p: SkinPaletteCache) {
     list.quad([x + leg_w, ly], [x + torso_w, ly], [x + torso_w, ly + leg_h], [x + leg_w, ly + leg_h], p.legs);
 }
 
-/// Title branding block (reference layout): FEATHERED wordmark with side
-/// rules + letter-spaced MINECRAFT subtitle under the feather art.
-fn draw_branding(list: &mut TriList, w: f32, h: f32) {
-    const TEXT: &str = "FEATHERED";
-    // Scale 7 ≈ 32% of a 1280-wide frame; left-aligned like the mock.
-    let scale = 7.0f32;
-    let x = 42.0f32;
-    let y = h * 0.335;
-    let tw = font::text_width(TEXT, scale);
-    font::draw_text_shadow(list, TEXT, x, y, scale, lin4([240, 242, 246, 255]));
-    // Side rules flanking MINECRAFT (letter-spaced feel via extra scale-1
-    // gaps drawn between characters' widths).
-    let sub = "M I N E C R A F T";
-    let sub_scale = 2.0f32;
-    let sub_w = font::text_width(sub, sub_scale);
-    let sub_y = y + 7.0 * scale + 14.0;
-    font::draw_text_shadow(list, sub, x, sub_y, sub_scale, lin4([190, 194, 202, 240]));
-    let rule_y = sub_y + 9.0;
-    list.quad([x, rule_y], [x + 26.0, rule_y], [x + 26.0, rule_y + 2.0], [x, rule_y + 2.0], lin4([120, 126, 136, 220]));
-    list.quad([x + sub_w - 26.0, rule_y], [x + sub_w, rule_y], [x + sub_w, rule_y + 2.0], [x + sub_w - 26.0, rule_y + 2.0], lin4([120, 126, 136, 220]));
-    let _ = (w, tw); // width reference for future responsive scaling
-}
-
-// --- title icon glyphs (24×24-ish vector boxes, drawn as flat quads) ---
-
-fn draw_icon_play(x: f32, y: f32, w: f32, h: f32, list: &mut TriList, c: [u8; 4]) {
-    // Triangle pointing right, centered in the box.
-    let cx = x + w * 0.5;
-    let cy = y + h * 0.5;
-    let s = h * 0.32;
-    list.quad([cx - s * 0.55, cy - s], [cx - s * 0.55, cy + s], [cx + s * 0.9, cy], [cx - s * 0.55, cy - s], c);
-}
-
-fn draw_icon_gear(x: f32, y: f32, w: f32, h: f32, list: &mut TriList, c: [u8; 4]) {
-    // Ring + 4 notches (screen-space quad approximation of a gear).
-    let cx = x + w * 0.5;
-    let cy = y + h * 0.5;
-    let r = h * 0.30;
-    let t = h * 0.10;
-    list.quad([cx - r, cy - t / 2.0], [cx + r, cy - t / 2.0], [cx + r, cy + t / 2.0], [cx - r, cy + t / 2.0], c);
-    list.quad([cx - t / 2.0, cy - r], [cx + t / 2.0, cy - r], [cx + t / 2.0, cy + r], [cx - t / 2.0, cy + r], c);
-    list.quad([cx - r * 0.72, cy - t / 2.0], [cx - r * 0.45, cy - t / 2.0], [cx - r * 0.45, cy + t / 2.0], [cx - r * 0.72, cy + t / 2.0], c);
-    let _ = w;
-}
-
-fn draw_icon_power(x: f32, y: f32, w: f32, h: f32, list: &mut TriList, c: [u8; 4]) {
-    // Power symbol: circle stroke (4 side strips) + vertical bar.
-    let cx = x + w * 0.5;
-    let cy = y + h * 0.55;
-    let r = h * 0.26;
-    let t = h * 0.09;
-    list.quad([cx - r, cy - t / 2.0], [cx + r, cy - t / 2.0], [cx + r, cy + t / 2.0], [cx - r, cy + t / 2.0], c);
-    list.quad([cx - r, cy], [cx - r + t, cy], [cx - r + t, cy + r], [cx - r, cy + r], c);
-    list.quad([cx + r - t, cy], [cx + r, cy], [cx + r, cy + r], [cx + r - t, cy + r], c);
-    list.quad([cx - t / 2.0, cy - r * 1.25], [cx + t / 2.0, cy - r * 1.25], [cx + t / 2.0, cy + r * 0.4], [cx - t / 2.0, cy + r * 0.4], c);
-    let _ = w;
-}
-
 /// Sanitize a world name into a directory name.
 fn sanitize_world(name: &str) -> String {
     let cleaned: String = name
@@ -1185,21 +1077,36 @@ mod tests {
     fn title_buttons_route_to_screens() {
         let dir = std::env::temp_dir().join(format!("feathered-menu-t-{}", std::process::id()));
         let mut m = menu();
-        // Simulate a drawn title at 1280x720 by drawing first.
+        // Draw the title at 1280x720 first (hit rects come from the layout).
         let mut list = TriList::default();
         m.draw(&mut list, 1280.0, 720.0);
-        let sp = m.hits.singleplayer.unwrap();
-        assert_eq!(m.click(ui::center(sp), &dir), MenuAction::None);
+        let l = m.last_title_layout.clone().unwrap();
+        // Play is selected by default: one click selects (no-op), a second
+        // click on the same row activates → Worlds.
+        assert_eq!(m.click(ui::center(l.rows[0]), &dir), MenuAction::None);
+        assert_eq!(m.click(ui::center(l.rows[0]), &dir), MenuAction::None);
         assert_eq!(m.screen, Screen::Worlds);
 
         m.screen = Screen::Title;
-        let mp = m.hits.multiplayer.unwrap();
-        m.click(ui::center(mp), &dir);
-        assert_eq!(m.screen, Screen::Multiplayer);
+        m.draw(&mut list, 1280.0, 720.0);
+        // Keyboard: move down twice (Settings → Quit), Enter activates.
+        m.title_move(1);
+        m.title_move(1);
+        assert_eq!(m.title_activate(), MenuAction::Quit);
 
         m.screen = Screen::Title;
-        let q = m.hits.quit.unwrap();
-        assert_eq!(m.click(ui::center(q), &dir), MenuAction::Quit);
+        m.title_sel = 1;
+        assert_eq!(m.title_activate(), MenuAction::None);
+        assert_eq!(m.screen, Screen::Settings);
+
+        // Footer link hit → whitelisted OpenUrl action.
+        m.screen = Screen::Title;
+        m.draw(&mut list, 1280.0, 720.0);
+        let l = m.last_title_layout.clone().unwrap();
+        match m.click(ui::center(l.footer[0]), &dir) {
+            MenuAction::OpenUrl(u) => assert_eq!(u, title::GITHUB_URL),
+            other => panic!("expected OpenUrl, got {other:?}"),
+        }
     }
 
     #[test]
