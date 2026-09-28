@@ -331,6 +331,13 @@ pub fn mesh_region(
     let mut out = MeshedChunk::default();
     let rects = sprite_tables(registry, uv_rects);
 
+    // Fluid path setup, hoisted out of the per-voxel loop: the sprite id
+    // lookup is a linear scan over every atlas sprite and the debug env var
+    // was re-read per water voxel (env reads take a process lock — measurable
+    // across an ocean column). Resolved once per mesh job.
+    let water_sprite = registry.sprite_id_by_name("minecraft", "block/water_still");
+    let fluid_debug = std::env::var("FEATHERED_DEBUG_FLUID").is_ok();
+
     for y in min[1]..max[1] {
         for z in min[2]..max[2] {
             for x in min[0]..max[0] {
@@ -399,9 +406,9 @@ pub fn mesh_region(
 
                 // Fluids (Phase 1: still water).
                 if block.name == "water" {
-                    match registry.sprite_id_by_name("minecraft", "block/water_still") {
+                    match water_sprite {
                         Some(sid) => {
-                            if std::env::var("FEATHERED_DEBUG_FLUID").is_ok() {
+                            if fluid_debug {
                                 eprintln!("[fluid] water at {x},{y},{z} sprite {sid:?}");
                             }
                             emit_fluid(
@@ -409,7 +416,7 @@ pub fn mesh_region(
                             );
                         }
                         None => {
-                            if std::env::var("FEATHERED_DEBUG_FLUID").is_ok() {
+                            if fluid_debug {
                                 let names = registry.sprite_names();
                                 eprintln!(
                                     "[fluid] water_still NOT FOUND; have {} sprites, sample: {:?}",
